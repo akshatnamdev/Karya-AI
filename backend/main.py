@@ -3,6 +3,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 import os
 
+from app.models import *
+
+#api routes
+from app.api.routes_test import router as test_router
+
 load_dotenv()
 
 app = FastAPI(
@@ -21,6 +26,8 @@ app.add_middleware(
 )
 
 # ==================== ROUTES ====================
+# Include routers
+app.include_router(test_router)
 
 @app.get("/")
 def read_root():
@@ -100,4 +107,4 @@ if __name__ == "__main__":
     print("📍 API: http://localhost:8000")
     print("📚 Docs: http://localhost:8000/docs")
     print("=" * 60 + "\n")
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)
