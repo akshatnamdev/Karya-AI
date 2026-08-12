@@ -16,13 +16,13 @@ engine = create_engine(
     max_overflow=10,              # Extra connections when needed
     pool_recycle=300,             # Recycle connections every 5 minutes
     pool_timeout=30,              # Wait 30s for a connection
-    connect_args={
-        "connect_timeout": 30,    # PostgreSQL connect timeout
-        "keepalives": 1,          # Enable TCP keepalives
-        "keepalives_idle": 30,    # Idle time before sending keepalive
-        "keepalives_interval": 10,# Time between keepalives  
-        "keepalives_count": 5,    # Number of keepalives before timeout
-    },
+    # connect_args={
+    #     "connect_timeout": 30,    # PostgreSQL connect timeout
+    #     "keepalives": 1,          # Enable TCP keepalives
+    #     "keepalives_idle": 30,    # Idle time before sending keepalive
+    #     "keepalives_interval": 10,# Time between keepalives  
+    #     "keepalives_count": 5,    # Number of keepalives before timeout
+    # },
     echo=settings.DEBUG           # Log SQL queries in debug mode
 )
 

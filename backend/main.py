@@ -6,7 +6,12 @@ import os
 from app.models import *
 
 #api routes
-from app.api.routes_test import router as test_router
+from app.api.routes import dashboard as dashboard_routes
+from app.api.routes import customers as customers_routes
+from app.api.routes import products as products_routes
+from app.api.routes import orders as orders_routes
+from app.api.routes import invoices as invoices_routes
+
 
 load_dotenv()
 
@@ -27,7 +32,13 @@ app.add_middleware(
 
 # ==================== ROUTES ====================
 # Include routers
-app.include_router(test_router)
+app.include_router(dashboard_routes.router)
+app.include_router(customers_routes.router)
+app.include_router(products_routes.router)
+app.include_router(orders_routes.router)
+app.include_router(invoices_routes.router)
+
+# ==================== ROOT ROUTES ====================
 
 @app.get("/")
 def read_root():
