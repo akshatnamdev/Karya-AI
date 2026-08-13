@@ -16,29 +16,17 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 # ==================== PASSWORD FUNCTIONS ====================
 
 def hash_password(password: str) -> str:
-    """
-    Hash a plain password using bcrypt
-    
-    Args:
-        password: Plain text password
-    
-    Returns:
-        Hashed password string
-    """
+    if isinstance(password, str):
+        # Truncate to 72 bytes maximum
+        password_bytes = password.encode('utf-8')[:72]
+        password = password_bytes.decode('utf-8', errors='ignore')
     return pwd_context.hash(password)
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """
-    Verify a plain password against its hash
-    
-    Args:
-        plain_password: Plain text password to verify
-        hashed_password: Hashed password from database
-    
-    Returns:
-        True if password matches, False otherwise
-    """
+    if isinstance(plain_password, str):
+        password_bytes = plain_password.encode('utf-8')[:72]
+        plain_password = password_bytes.decode('utf-8', errors='ignore')
     return pwd_context.verify(plain_password, hashed_password)
 
 
@@ -48,16 +36,6 @@ def create_access_token(
     data: dict, 
     expires_delta: Optional[timedelta] = None
 ) -> str:
-    """
-    Create a JWT access token
-    
-    Args:
-        data: Data to encode (e.g., {"sub": "user@email.com", "user_id": 1})
-        expires_delta: Custom expiration time
-    
-    Returns:
-        Encoded JWT token string
-    """
     to_encode = data.copy()
     
     # Set expiration time
@@ -70,7 +48,6 @@ def create_access_token(
     
     to_encode.update({"exp": expire})
     
-    # Encode the token
     encoded_jwt = jwt.encode(
         to_encode,
         settings.SECRET_KEY,
@@ -80,15 +57,7 @@ def create_access_token(
 
 
 def decode_access_token(token: str) -> Optional[dict]:
-    """
-    Decode and verify a JWT token
-    
-    Args:
-        token: JWT token string
-    
-    Returns:
-        Decoded payload dict or None if invalid
-    """
+
     try:
         payload = jwt.decode(
             token,

@@ -11,7 +11,7 @@ from app.api.routes import customers as customers_routes
 from app.api.routes import products as products_routes
 from app.api.routes import orders as orders_routes
 from app.api.routes import invoices as invoices_routes
-
+from app.api.routes import auth as auth_routes
 
 load_dotenv()
 
@@ -32,6 +32,7 @@ app.add_middleware(
 
 # ==================== ROUTES ====================
 # Include routers
+app.include_router(auth_routes.router)
 app.include_router(dashboard_routes.router)
 app.include_router(customers_routes.router)
 app.include_router(products_routes.router)
