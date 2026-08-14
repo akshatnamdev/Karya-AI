@@ -10,7 +10,6 @@ from app.models.customer import Customer
 from app.models.product import Product
 from app.utils.formatters import safe_float, safe_iso
 
-
 class OrderService:
     """Handles all order-related business logic"""
     

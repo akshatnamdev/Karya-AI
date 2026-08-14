@@ -5,7 +5,7 @@ Handles all interactions with Gemini API
 import os
 import time
 from typing import Optional
-import google.generativeai as genai
+from google import genai
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -19,7 +19,7 @@ class AIService:
         if not self.api_key:
             raise ValueError("GEMINI_API_KEY not found in .env file")
         
-        genai.configure(api_key=self.api_key)
+        self.client = genai.Client(api_key=self.api_key)
         
         # Model selection based on task
         self.models = {
@@ -52,8 +52,10 @@ class AIService:
         
         for attempt in range(max_retries):
             try:
-                model = genai.GenerativeModel(model_name)
-                response = model.generate_content(prompt)
+                response = self.client.models.generate_content(
+                    model=model_name,
+                    contents=prompt
+                )
                 
                 return {
                     "status": "success",

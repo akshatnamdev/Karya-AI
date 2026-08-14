@@ -11,6 +11,7 @@ from app.api.routes import customers as customers_routes
 from app.api.routes import products as products_routes
 from app.api.routes import orders as orders_routes
 from app.api.routes import invoices as invoices_routes
+from app.api.routes import ai as ai_routes
 from app.api.routes import auth as auth_routes
 
 load_dotenv()
@@ -38,11 +39,13 @@ app.include_router(customers_routes.router)
 app.include_router(products_routes.router)
 app.include_router(orders_routes.router)
 app.include_router(invoices_routes.router)
+app.include_router(ai_routes.router)
 
 # ==================== ROOT ROUTES ====================
 
 @app.get("/")
 def read_root():
+
     return {
         "app": "Karya AI 🇮🇳",
         "message": "AI Operating System for Indian Small Businesses",

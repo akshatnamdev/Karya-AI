@@ -8,7 +8,6 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 from app.core.config import settings
 
-
 # Password hashing context using bcrypt
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -21,7 +20,6 @@ def hash_password(password: str) -> str:
         password_bytes = password.encode('utf-8')[:72]
         password = password_bytes.decode('utf-8', errors='ignore')
     return pwd_context.hash(password)
-
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     if isinstance(plain_password, str):
