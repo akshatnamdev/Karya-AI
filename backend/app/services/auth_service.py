@@ -1,39 +1,64 @@
-
+"""
+Authentication Service
+Handles registration + login for all three role types
+"""
 from datetime import datetime
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.models.business import Business
+from app.models.customer import Customer
 from app.core.security import hash_password, verify_password, create_access_token
 from app.core.config import settings
-from app.schemas.auth import UserRegister, UserLogin
+from app.schemas.auth import UserRegister, UserLogin, CustomerRegister
+
 
 class AuthService:
+    """Handles authentication for all role types"""
+    
+    # Redirect paths per role
+    REDIRECT_MAP = {
+        UserRole.PLATFORM_ADMIN: "/admin",
+        UserRole.BUSINESS_OWNER: "/dashboard",
+        UserRole.CUSTOMER: "/portal",
+    }
+    
+    # ==================== BUSINESS OWNER REGISTRATION ====================
+    
     @staticmethod
-    def register_user(db: Session, user_data: UserRegister) -> dict:
+    def register_business_owner(db: Session, user_data: UserRegister) -> dict:
+        """Register a new business owner + their business"""
+        
         if AuthService._email_exists(db, user_data.email):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Email already registered. Please login instead."
+                detail="Email already registered."
             )
         
         try:
             business = AuthService._create_business_if_needed(db, user_data)
             business_id = business.id if business else None
-            new_user = AuthService._create_user(db, user_data, business_id)
+            
+            new_user = User(
+                name=user_data.name,
+                email=user_data.email,
+                phone=user_data.phone,
+                password_hash=hash_password(user_data.password),
+                role=UserRole.BUSINESS_OWNER,
+                is_active=True,
+                is_verified=False,
+                business_id=business_id
+            )
+            db.add(new_user)
+            db.commit()
+            db.refresh(new_user)
             
             if business:
                 business.owner_id = new_user.id
-                db.commit() 
+                db.commit()
             
-            token = AuthService._generate_token(new_user)
-            return {
-                "access_token": token,
-                "token_type": "bearer",
-                "expires_in_minutes": settings.ACCESS_TOKEN_EXPIRE_MINUTES,
-                "user": new_user  # Pydantic will convert this to UserResponse
-            }
+            return AuthService._build_token_response(new_user)
         
         except HTTPException:
             raise
@@ -43,18 +68,73 @@ class AuthService:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Registration failed: {str(e)}"
             )
+    
+    # ==================== CUSTOMER REGISTRATION ====================
+    
+    @staticmethod
+    def register_customer(db: Session, data: CustomerRegister) -> dict:
+        """Register a new customer to a specific business"""
+        
+        if AuthService._email_exists(db, data.email):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email already registered."
+            )
+        
+        business = db.query(Business).filter(Business.id == data.business_id).first()
+        if not business:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Business not found"
+            )
+        
+        try:
+            customer = Customer(
+                name=data.name,
+                phone=data.phone,
+                whatsapp_number=data.phone,
+                email=data.email,
+                customer_type="retail",
+                business_id=data.business_id,
+            )
+            db.add(customer)
+            db.flush()
+            
+            new_user = User(
+                name=data.name,
+                email=data.email,
+                phone=data.phone,
+                password_hash=hash_password(data.password),
+                role=UserRole.CUSTOMER,
+                is_active=True,
+                is_verified=False,
+                business_id=data.business_id,
+                customer_id=customer.id,
+            )
+            db.add(new_user)
+            db.commit()
+            db.refresh(new_user)
+            
+            return AuthService._build_token_response(new_user)
+        
+        except HTTPException:
+            raise
+        except Exception as e:
+            db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Customer registration failed: {str(e)}"
+            )
+    
+    # ==================== LOGIN (all roles use same endpoint) ====================
+    
     @staticmethod
     def login_user(db: Session, credentials: UserLogin) -> dict:
-        # SQL: SELECT * FROM users WHERE email = 'akshat@karyaai.com';
+        """Universal login - routes to correct dashboard based on role"""
+        
         user = db.query(User).filter(User.email == credentials.email).first()
         
-        if not user:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid email or password"
-            )
-
-        if not verify_password(credentials.password, user.password_hash):
+        if not user or not verify_password(credentials.password, user.password_hash):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid email or password"
@@ -63,24 +143,40 @@ class AuthService:
         if not user.is_active:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Account is inactive. Contact support."
+                detail="Account is inactive"
             )
         
         user.last_login = datetime.utcnow()
-        db.commit()  # Save to database
-        db.refresh(user)  # Reload from database
-        token = AuthService._generate_token(user)
+        db.commit()
+        db.refresh(user)
         
-        return {
-            "access_token": token,
-            "token_type": "bearer",
-            "expires_in_minutes": settings.ACCESS_TOKEN_EXPIRE_MINUTES,
-            "user": user
-        }
+        return AuthService._build_token_response(user)
     
-    # ==================== PRIVATE HELPER METHODS ====================
-    # Note the underscore prefix (_) - these are for internal use only
-    # Other code should NOT call these directly
+    # ==================== PLATFORM ADMIN CREATION (special) ====================
+    
+    @staticmethod
+    def create_platform_admin(db: Session, name: str, email: str, password: str) -> User:
+        """
+        Create a platform admin. Only called from CLI/seed script.
+        Not exposed via public API.
+        """
+        if AuthService._email_exists(db, email):
+            raise ValueError("Email already exists")
+        
+        admin = User(
+            name=name,
+            email=email,
+            password_hash=hash_password(password),
+            role=UserRole.PLATFORM_ADMIN,
+            is_active=True,
+            is_verified=True,
+        )
+        db.add(admin)
+        db.commit()
+        db.refresh(admin)
+        return admin
+    
+    # ==================== PRIVATE HELPERS ====================
     
     @staticmethod
     def _email_exists(db: Session, email: str) -> bool:
@@ -95,40 +191,33 @@ class AuthService:
             name=user_data.business_name,
             business_type=user_data.business_type or "wholesaler",
             phone=user_data.phone,
-            currency="INR",           # Default for Indian businesses
-            timezone="Asia/Kolkata"    # Indian timezone
+            city=getattr(user_data, 'city', None) or None   , # Added city handling
+            currency="INR",
+            timezone="Asia/Kolkata"
         )
-        
-        # Add to database session (but don't commit yet)
         db.add(business)
-        
-        # Flush = send to database but don't commit
-        # This gives us the business.id without saving permanently
         db.flush()
         return business
-    
+
+        
     @staticmethod
-    def _create_user(db: Session, user_data: UserRegister, business_id: int = None) -> User:
-        new_user = User(
-            name=user_data.name,
-            email=user_data.email,
-            phone=user_data.phone,
-            password_hash=hash_password(user_data.password),
-            role="owner",           # First user is always the owner
-            is_active=True,           # Active by default
-            is_verified=False,      # Not verified (email verification comes later)
-            business_id=business_id   # Link to business (or None)
-        )
-        db.add(new_user)
-        db.commit()     
-        db.refresh(new_user)  
-        return new_user
-    
-    @staticmethod
-    def _generate_token(user: User) -> str:
-        return create_access_token(
-            data={
-                "sub": user.email,      # "sub" = subject (standard JWT claim)
-                "user_id": user.id      # Custom claim for easy access
-            }
-        )
+    def _build_token_response(user: User) -> dict:
+        """Build standard token response with role-based redirect"""
+        token = create_access_token(data={
+            "sub": user.email,
+            "user_id": user.id,
+            "role": user.role.value if hasattr(user.role, 'value') else user.role,
+            "business_id": user.business_id,
+            "customer_id": user.customer_id,
+        })
+        
+        role_value = user.role.value if hasattr(user.role, 'value') else user.role
+        redirect_to = AuthService.REDIRECT_MAP.get(user.role, "/dashboard")
+        
+        return {
+            "access_token": token,
+            "token_type": "bearer",
+            "expires_in_minutes": settings.ACCESS_TOKEN_EXPIRE_MINUTES,
+            "user": user,
+            "redirect_to": redirect_to,
+        }

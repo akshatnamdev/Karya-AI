@@ -275,7 +275,7 @@ Once the server is running, test these endpoints:
 ┌─────────────────────────────────────────────┐
 │  1. Owner opens Karya AI Dashboard          │
 │     🔴 3 products low on stock              │
-│     🟠 ₹1.4L outstanding payments           │
+│     🟠 ₹1.4L nding payments           │
 │     🟢 5 customers due for reorder          │
 └─────────────────────────────────────────────┘
                     ↓

@@ -1,7 +1,6 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from datetime import date, datetime, timedelta
-
+from datetime import date, datetime
 
 from app.models.business import Business
 from app.models.customer import Customer
@@ -9,162 +8,173 @@ from app.models.product import Product
 from app.models.inventory import Inventory
 from app.models.order import Order
 from app.models.invoice import Invoice
-from app.utils.formatters import safe_float
+from app.utils.formatters import safe_float, safe_int
+
 
 class BusinessContextBuilder:
-    @staticmethod
-    def build_full_context(db: Session) -> str:
-        """Build complete business context string for AI"""
-        
-        business_info = BusinessContextBuilder._get_business_info(db)
-        customers_info = BusinessContextBuilder._get_customers_info(db)
-        products_info = BusinessContextBuilder._get_products_info(db)
-        orders_info = BusinessContextBuilder._get_orders_info(db)
-        financial_info = BusinessContextBuilder._get_financial_info(db)
-        alerts_info = BusinessContextBuilder._get_alerts_info(db)
-        
-        context = f"""
-BUSINESS INFORMATION:
-{business_info}
-
-CUSTOMERS DATA:
-{customers_info}
-
-PRODUCTS & INVENTORY:
-{products_info}
-
-ORDERS DATA:
-{orders_info}
-
-FINANCIAL OVERVIEW:
-{financial_info}
-
-CURRENT ALERTS:
-{alerts_info}
-"""
-        return context.strip()
-
-    # =================== PRITAVE HELPERS====================    
-    @staticmethod
-    def _get_business_info(db: Session) -> str:
-        business = db.query(Business).first()
-        
-        if not business:
-            return "No business registered."
-        
-        return f"""- Business Name: {business.name}
-- Type: {business.business_type}
-- City: {business.city}, {business.state}
-- GST: {business.gst_number}"""
+    """Gathers real business data for AI context - STRICTLY SCOPED BY AUTHENTICATED ROLE"""
     
     @staticmethod
-    def _get_customers_info(db: Session) -> str:
-        customers = db.query(Customer).all()
+    def build_full_context(db: Session, scope: dict) -> str:
+        # Trust ONLY the authenticated scope derived from the JWT token
+        scope_type = scope.get("scope", "business")
+        business_id = scope.get("business_id")
+        customer_id = scope.get("customer_id")
         
-        if not customers:
-            return "No customers yet."
+        context_parts = []
         
-        customer_lines = []
-        for cust in customers:
-            outstanding = safe_float(cust.outstanding_amount)
-            outstanding_str = f"₹{outstanding:,.0f} outstanding" if outstanding > 0 else "no dues"
+        # 1. Business Info
+        context_parts.append("BUSINESS INFORMATION:\n" + BusinessContextBuilder._safe_get_business(db, business_id, scope_type))
+        
+        # 2. Product Catalog (Scoped)
+        context_parts.append("\nPRODUCTS & CATALOG:\n" + BusinessContextBuilder._safe_get_products(db, business_id, scope_type))
+        
+        # 3. Orders (Strictly Scoped)
+        context_parts.append("\nORDERS DATA:\n" + BusinessContextBuilder._safe_get_orders(db, business_id, customer_id, scope_type))
+        
+        # 4. Invoices (Strictly Scoped)
+        context_parts.append("\nINVOICES & FINANCIALS:\n" + BusinessContextBuilder._safe_get_invoices(db, business_id, customer_id, scope_type))
+
+        # 5. Role-Specific Extensions
+        if scope_type in ["business", "all"]:
+            context_parts.append("\nCUSTOMERS DATA:\n" + BusinessContextBuilder._safe_get_customers(db, business_id, scope_type))
+            context_parts.append("\nFINANCIAL OVERVIEW:\n" + BusinessContextBuilder._safe_get_financial_summary(db, business_id, scope_type))
+            context_parts.append("\nCURRENT ALERTS:\n" + BusinessContextBuilder._safe_get_alerts(db, business_id, scope_type))
+        elif scope_type == "customer":
+            context_parts.append("\nMY ACCOUNT PROFILE:\n" + BusinessContextBuilder._safe_get_my_profile(db, customer_id))
+
+        return "\n".join(context_parts).strip()
+
+    # ==================== PRIVATE SECURE HELPERS ====================
+    
+    @staticmethod
+    def _safe_get_business(db: Session, business_id: int, scope_type: str) -> str:
+        try:
+            if scope_type == "all": return "Platform Admin View: System-wide access."
+            if not business_id: return "No specific business linked."
+            business = db.query(Business).filter(Business.id == business_id).first()
+            if not business: return "Business information not found."
+            return f"- Business Name: {business.name or 'Unnamed'}\n- Type: {business.business_type or 'General'}\n- Location: {business.city or 'India'}"
+        except Exception as e: return f"Error loading business info: {e}"
+
+    @staticmethod
+    def _safe_get_my_profile(db: Session, customer_id: int) -> str:
+        try:
+            if not customer_id: return "No customer profile linked."
+            c = db.query(Customer).filter(Customer.id == customer_id).first()
+            if not c: return "Profile not found."
+            return f"- Name: {c.name}\n- Phone: {c.phone}\n- Credit Limit: ₹{safe_float(c.credit_limit):,.0f}\n- Outstanding Dues: ₹{safe_float(c.outstanding_amount):,.0f}"
+        except Exception as e: return f"Error loading profile: {e}"
+    
+    @staticmethod
+    def _safe_get_customers(db: Session, business_id: int, scope_type: str) -> str:
+        try:
+            if scope_type == "customer": return "" # Hard block
+            q = db.query(Customer)
+            if scope_type == "business" and business_id:
+                q = q.filter(Customer.business_id == business_id)
+            customers = q.all()
+            if not customers: return "No customers registered yet."
             
-            customer_lines.append(
-                f"- {cust.name} ({cust.customer_type}): "
-                f"Phone {cust.phone}, "
-                f"{outstanding_str}, "
-                f"Credit limit ₹{safe_float(cust.credit_limit):,.0f}"
-            )
-        
-        return "\n".join(customer_lines)
+            lines = []
+            for cust in customers:
+                out = safe_float(cust.outstanding_amount)
+                out_str = f"₹{out:,.0f} outstanding" if out > 0 else "no dues"
+                lines.append(f"- {cust.name or 'Unnamed'} ({cust.customer_type or 'retail'}): Phone {cust.phone or 'N/A'}, {out_str}, Credit limit ₹{safe_float(cust.credit_limit):,.0f}")
+            return "\n".join(lines)
+        except Exception as e: return f"Error loading customers: {e}"
     
     @staticmethod
-    def _get_products_info(db: Session) -> str:
-        products = db.query(Product).all()
-        
-        if not products:
-            return "No products yet."
-        
-        product_lines = []
-        for prod in products:
-            inv = db.query(Inventory).filter(Inventory.product_id == prod.id).first()
-            stock = inv.current_stock if inv else 0
-            reorder = inv.reorder_level if inv else 0
+    def _safe_get_products(db: Session, business_id: int, scope_type: str) -> str:
+        try:
+            q = db.query(Product)
+            if scope_type in ["business", "customer"] and business_id:
+                q = q.filter(Product.business_id == business_id)
+            if scope_type == "customer":
+                q = q.filter(Product.is_active == True)
+                
+            products = q.all()
+            if not products: return "No products listed in catalog."
             
-            status = "🔴 CRITICAL" if stock < (reorder * 0.5) else "🟡 LOW" if stock <= reorder else "🟢 OK"
+            lines = []
+            for prod in products:
+                price = f"Price ₹{safe_float(prod.selling_price):,.0f}"
+                if scope_type in ["business", "all"]:
+                    inv = db.query(Inventory).filter(Inventory.product_id == prod.id).first()
+                    stock = safe_int(inv.current_stock) if inv else 0
+                    reorder = safe_int(inv.reorder_level) if inv else 0
+                    status = "CRITICAL" if stock < (reorder * 0.5) else "LOW" if stock <= reorder else "OK"
+                    lines.append(f"- {prod.name} (SKU: {prod.sku}): Stock {stock}/{reorder}, {price}, Status: {status}")
+                else:
+                    lines.append(f"- {prod.name}: {price} (Available)")
+            return "\n".join(lines)
+        except Exception as e: return f"Error loading products: {e}"
+    
+    @staticmethod
+    def _safe_get_orders(db: Session, business_id: int, customer_id: int, scope_type: str) -> str:
+        try:
+            q = db.query(Order).order_by(Order.order_date.desc()).limit(15)
+            # STRICT SCOPING
+            if scope_type == "business" and business_id:
+                q = q.filter(Order.business_id == business_id)
+            elif scope_type == "customer" and customer_id:
+                q = q.filter(Order.customer_id == customer_id)
+                
+            orders = q.all()
+            if not orders: return "No order history found."
             
-            product_lines.append(
-                f"- {prod.name} (SKU: {prod.sku}): "
-                f"Stock {stock}/{reorder}, "
-                f"Price ₹{safe_float(prod.selling_price):,.0f}, "
-                f"Category: {prod.category}, "
-                f"Status: {status}"
-            )
+            lines = []
+            for o in orders:
+                o_date = o.order_date.strftime('%Y-%m-%d') if isinstance(o.order_date, (date, datetime)) else "Recent"
+                lines.append(f"- Order {o.order_number or f'#{o.id}'}: ₹{safe_float(o.total_amount):,.0f}, Status: {o.status or 'pending'}, Date: {o_date}")
+            return "\n".join(lines)
+        except Exception as e: return f"Error loading orders: {e}"
         
-        return "\n".join(product_lines)
-    
     @staticmethod
-    def _get_orders_info(db: Session) -> str:
-        orders = db.query(Order).order_by(Order.order_date.desc()).limit(5).all()
-        
-        if not orders:
-            return "No orders yet."
-        
-        order_lines = ["Recent 5 orders:"]
-        for order in orders:
-            customer = db.query(Customer).filter(Customer.id == order.customer_id).first()
-            customer_name = customer.name if customer else "Unknown"
-            
-            order_lines.append(
-                f"- {order.order_number}: "
-                f"{customer_name}, "
-                f"₹{safe_float(order.total_amount):,.0f}, "
-                f"{order.status}, "
-                f"Date: {order.order_date.strftime('%Y-%m-%d')}"
-            )
-        
-        return "\n".join(order_lines)
-    
+    def _safe_get_invoices(db: Session, business_id: int, customer_id: int, scope_type: str) -> str:
+        try:
+            q = db.query(Invoice).order_by(Invoice.due_date.asc())
+            # STRICT SCOPING
+            if scope_type == "business" and business_id:
+                q = q.join(Order).filter(Order.business_id == business_id)
+            elif scope_type == "customer" and customer_id:
+                q = q.join(Order).filter(Order.customer_id == customer_id)
+                
+            invoices = q.all()
+            if not invoices: return "No invoice or billing records."
+                
+            lines = []
+            for i in invoices:
+                d_date = i.due_date.strftime('%Y-%m-%d') if isinstance(i.due_date, (date, datetime)) else "N/A"
+                lines.append(f"- Invoice {i.invoice_number}: Total ₹{safe_float(i.total_amount):,.0f}, Pending: ₹{safe_float(i.balance_amount):,.0f}, Status: {i.status}, Due: {d_date}")
+            return "\n".join(lines)
+        except Exception as e: return f"Error loading invoices: {e}"
+
     @staticmethod
-    def _get_financial_info(db: Session) -> str:
-        total_revenue = db.query(func.sum(Order.total_amount)).scalar() or 0
-        total_outstanding = db.query(func.sum(Customer.outstanding_amount)).scalar() or 0
-        total_paid = db.query(func.sum(Invoice.paid_amount)).scalar() or 0
-        
-        stock_value = db.query(
-            func.sum(Inventory.current_stock * Product.selling_price)
-        ).join(Product, Inventory.product_id == Product.id).scalar() or 0
-        
-        return f"""- Total Revenue: ₹{safe_float(total_revenue):,.0f}
-- Total Received: ₹{safe_float(total_paid):,.0f}
-- Total Outstanding: ₹{safe_float(total_outstanding):,.0f}
-- Stock Value: ₹{safe_float(stock_value):,.0f}"""
-    
+    def _safe_get_financial_summary(db: Session, business_id: int, scope_type: str) -> str:
+        try:
+            if scope_type == "customer": return ""
+            order_q = db.query(func.sum(Order.total_amount))
+            cust_q = db.query(func.sum(Customer.outstanding_amount))
+            if scope_type == "business" and business_id:
+                order_q = order_q.filter(Order.business_id == business_id)
+                cust_q = cust_q.filter(Customer.business_id == business_id)
+            rev = order_q.scalar() or 0
+            out = cust_q.scalar() or 0
+            return f"- Total Revenue: ₹{safe_float(rev):,.0f}\n- Total Outstanding: ₹{safe_float(out):,.0f}"
+        except Exception: return ""
+
     @staticmethod
-    def _get_alerts_info(db: Session) -> str:
-        alerts = []
-        
-        overdue = db.query(Invoice).filter(Invoice.status == "overdue").all()
-        if overdue:
-            overdue_amount = sum(safe_float(inv.balance_amount) for inv in overdue)
-            alerts.append(f"⚠️ {len(overdue)} overdue invoices worth ₹{overdue_amount:,.0f}")
-            for inv in overdue:
-                order = db.query(Order).filter(Order.id == inv.order_id).first()
-                customer = db.query(Customer).filter(Customer.id == order.customer_id).first() if order else None
-                customer_name = customer.name if customer else "Unknown"
-                days_overdue = (date.today() - inv.due_date).days if inv.due_date else 0
-                alerts.append(f"  - {customer_name}: ₹{safe_float(inv.balance_amount):,.0f} ({days_overdue} days overdue)")
-        
-        low_stock = db.query(Inventory, Product).join(
-            Product, Inventory.product_id == Product.id
-        ).filter(Inventory.current_stock <= Inventory.reorder_level).all()
-        
-        if low_stock:
-            alerts.append(f"⚠️ {len(low_stock)} products low on stock")
-            for inv, product in low_stock:
-                alerts.append(f"  - {product.name}: {inv.current_stock}/{inv.reorder_level} units")
-        
-        if not alerts:
-            return "✅ No alerts - everything looks good!"
-        
-        return "\n".join(alerts)
+    def _safe_get_alerts(db: Session, business_id: int, scope_type: str) -> str:
+        try:
+            if scope_type == "customer": return ""
+            alerts = []
+            inv_q = db.query(Invoice).filter(Invoice.status == "overdue")
+            if scope_type == "business" and business_id:
+                inv_q = inv_q.join(Order).filter(Order.business_id == business_id)
+            overdue = inv_q.all()
+            if overdue:
+                amt = sum(safe_float(i.balance_amount) for i in overdue)
+                alerts.append(f"OVERDUE: {len(overdue)} invoices worth ₹{amt:,.0f}")
+            return "\n".join(alerts) if alerts else "No active alerts."
+        except Exception: return ""

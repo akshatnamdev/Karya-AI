@@ -1,6 +1,5 @@
 """
-Karya AI - Product Service
-Business logic for products and inventory
+Product Service - role-aware
 """
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
@@ -11,60 +10,45 @@ from app.utils.formatters import safe_float, format_currency
 
 
 class ProductService:
-    """Handles all product and inventory-related business logic"""
     
     @staticmethod
-    def get_all_products(db: Session) -> list:
-        """
-        Get all products with their inventory info
+    def get_all_products(db: Session, scope: dict) -> list:
+        q = db.query(Product)
+        if scope["scope"] in ("business", "customer"):
+            q = q.filter(Product.business_id == scope["business_id"])
+        # For customers, only show active products
+        if scope["scope"] == "customer":
+            q = q.filter(Product.is_active == True)
         
-        Returns:
-            list: List of product dictionaries with stock info
-        """
-        products = db.query(Product).all()
-        return [
-            ProductService._format_product_with_stock(product, db) 
-            for product in products
-        ]
+        products = q.all()
+        return [ProductService._format_product_with_stock(p, db) for p in products]
     
     @staticmethod
-    def get_product_detail(db: Session, product_id: int) -> dict:
-        """
-        Get single product detail with inventory
+    def get_product_detail(db: Session, product_id: int, scope: dict) -> dict:
+        q = db.query(Product).filter(Product.id == product_id)
+        if scope["scope"] in ("business", "customer"):
+            q = q.filter(Product.business_id == scope["business_id"])
         
-        Args:
-            product_id: ID of the product
-            
-        Returns:
-            dict: Product info with inventory
-            
-        Raises:
-            HTTPException: 404 if product not found
-        """
-        product = db.query(Product).filter(Product.id == product_id).first()
-        
+        product = q.first()
         if not product:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Product with ID {product_id} not found"
-            )
+            raise HTTPException(status_code=404, detail="Product not found")
         
         return ProductService._format_product_with_stock(product, db)
     
     @staticmethod
-    def get_low_stock_products(db: Session) -> dict:
-        """
-        Get products that need reordering (inventory intelligence!)
+    def get_low_stock_products(db: Session, scope: dict) -> dict:
+        # Customers don't need low stock info
+        if scope["scope"] == "customer":
+            return {"count": 0, "alert": "", "products": []}
         
-        Returns:
-            dict: Alert with low-stock products list
-        """
-        # Join Inventory and Product where stock is low
-        low_stock = db.query(Inventory, Product).join(
+        q = db.query(Inventory, Product).join(
             Product, Inventory.product_id == Product.id
-        ).filter(
-            Inventory.current_stock <= Inventory.reorder_level
-        ).all()
+        ).filter(Inventory.current_stock <= Inventory.reorder_level)
+        
+        if scope["scope"] == "business":
+            q = q.filter(Product.business_id == scope["business_id"])
+        
+        low_stock = q.all()
         
         return {
             "count": len(low_stock),
@@ -75,14 +59,11 @@ class ProductService:
             ]
         }
     
-    # ==================== PRIVATE HELPER METHODS ====================
+    # ==================== PRIVATE HELPERS ====================
     
     @staticmethod
-    def _format_product_with_stock(product: Product, db: Session) -> dict:
-        """Format product with inventory data"""
-        inv = db.query(Inventory).filter(
-            Inventory.product_id == product.id
-        ).first()
+    def _format_product_with_stock(product, db):
+        inv = db.query(Inventory).filter(Inventory.product_id == product.id).first()
         
         return {
             "id": product.id,
@@ -105,15 +86,8 @@ class ProductService:
         }
     
     @staticmethod
-    def _format_low_stock_product(inv: Inventory, product: Product) -> dict:
-        """Format low-stock product with urgency info"""
-        # Calculate urgency level
-        urgency = ProductService._calculate_urgency(
-            inv.current_stock, 
-            inv.reorder_level
-        )
-        
-        # Calculate estimated reorder cost
+    def _format_low_stock_product(inv, product):
+        urgency = ProductService._calculate_urgency(inv.current_stock, inv.reorder_level)
         estimated_cost = safe_float(product.cost_price) * inv.reorder_quantity
         
         return {
@@ -129,18 +103,15 @@ class ProductService:
         }
     
     @staticmethod
-    def _calculate_urgency(current_stock: int, reorder_level: int) -> str:
-        """Calculate urgency level based on stock levels"""
-        if current_stock < (reorder_level * 0.5):
-            return "🔴 Critical"
-        elif current_stock < reorder_level:
-            return "🟡 Warning"
-        else:
-            return "🟢 Healthy"
+    def _calculate_urgency(current, reorder):
+        if current < (reorder * 0.5):
+            return "Critical"
+        elif current < reorder:
+            return "Warning"
+        return "Healthy"
     
     @staticmethod
-    def _get_low_stock_message(count: int) -> str:
-        """Generate low stock alert message"""
+    def _get_low_stock_message(count):
         if count == 0:
-            return "✅ All stock levels healthy"
-        return f"⚠️ {count} products need reordering"
+            return "All stock levels healthy"
+        return f"{count} products need reordering"

@@ -13,6 +13,11 @@ from app.api.routes import orders as orders_routes
 from app.api.routes import invoices as invoices_routes
 from app.api.routes import ai as ai_routes
 from app.api.routes import auth as auth_routes
+from app.api.routes import public as public_routes
+from app.api.routes import admin as admin_routes
+from app.api.routes import support as support_routes
+
+
 
 load_dotenv()
 
@@ -40,6 +45,11 @@ app.include_router(products_routes.router)
 app.include_router(orders_routes.router)
 app.include_router(invoices_routes.router)
 app.include_router(ai_routes.router)
+app.include_router(public_routes.router)
+app.include_router(admin_routes.router)
+app.include_router(support_routes.router)
+
+
 
 # ==================== ROOT ROUTES ====================
 

@@ -1,38 +1,41 @@
 """
-Karya AI - Invoice Routes
-Endpoints: /api/invoices/*
+Invoice Routes
 """
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
+from app.core.dependencies import get_current_user, get_business_scope
+from app.models.user import User
 from app.services.invoice_service import InvoiceService
 
 
-router = APIRouter(prefix="/api/invoices", tags=["💰 Invoices & Payments"])
+router = APIRouter(prefix="/api/invoices", tags=["Invoices"])
 
 
 @router.get("")
-def get_invoices(db: Session = Depends(get_db)):
-    """💰 Get all invoices (sorted by newest first)"""
-    return InvoiceService.get_all_invoices(db)
+def get_invoices(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    scope: dict = Depends(get_business_scope),
+):
+    return InvoiceService.get_all_invoices(db, scope)
 
 
 @router.get("/overdue")
-def get_overdue_invoices(db: Session = Depends(get_db)):
-    """
-    🔴 PAYMENT INTELLIGENCE - Get overdue invoices
-    
-    Returns overdue invoices with:
-    - Auto-drafted Hinglish reminder messages
-    - Days overdue calculation
-    - Urgency levels
-    - Ready-to-send WhatsApp reminders
-    """
-    return InvoiceService.get_overdue_invoices(db)
+def get_overdue_invoices(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    scope: dict = Depends(get_business_scope),
+):
+    return InvoiceService.get_overdue_invoices(db, scope)
 
 
 @router.get("/{invoice_id}")
-def get_invoice(invoice_id: int, db: Session = Depends(get_db)):
-    """📋 Get single invoice detail"""
-    return InvoiceService.get_invoice_detail(db, invoice_id)
+def get_invoice(
+    invoice_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    scope: dict = Depends(get_business_scope),
+):
+    return InvoiceService.get_invoice_detail(db, invoice_id, scope)

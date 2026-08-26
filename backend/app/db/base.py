@@ -17,3 +17,4 @@ from app.models.conversation import Conversation
 from app.models.ai_action import AIAction
 from app.models.embedding import Embedding
 from app.models.audit_log import AuditLog
+from app.models.support import SupportTicket, SupportMessage  # noqa

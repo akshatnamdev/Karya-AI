@@ -26,15 +26,24 @@ class InvoiceService:
     }
     
     @staticmethod
-    def get_all_invoices(db: Session) -> list:
-        """
-        Get all invoices sorted by most recent
-        
-        Returns:
-            list: List of invoices with customer info and status
-        """
-        invoices = db.query(Invoice).order_by(Invoice.invoice_date.desc()).all()
-        return [InvoiceService._format_invoice(inv, db) for inv in invoices]
+    def get_all_invoices(db: Session, scope: dict) -> list:
+        try:
+            q = db.query(Invoice).order_by(Invoice.invoice_date.desc())
+
+            if scope["scope"] == "business":
+                q = q.join(Order, Invoice.order_id == Order.id).filter(
+                    Order.business_id == scope["business_id"]
+                )
+            elif scope["scope"] == "customer":
+                q = q.join(Order, Invoice.order_id == Order.id).filter(
+                    Order.customer_id == scope["customer_id"]
+                )
+
+            invoices = q.all()
+            return [InvoiceService._format_invoice(inv, db) for inv in invoices]
+        except Exception as e:
+            print(f"[invoice_service.get_all_invoices] {e}")
+            return []
     
     @staticmethod
     def get_invoice_detail(db: Session, invoice_id: int) -> dict:
@@ -61,33 +70,40 @@ class InvoiceService:
         return InvoiceService._format_invoice_detail(invoice, db)
     
     @staticmethod
-    def get_overdue_invoices(db: Session) -> dict:
-        """
-        💰 PAYMENT INTELLIGENCE - Get overdue invoices with auto-drafted Hindi reminders!
-        
-        This is Karya AI's killer feature - not just showing overdue payments,
-        but generating personalized Hinglish reminder messages ready to send.
-        
-        Returns:
-            dict: Overdue invoices with total amount and suggested reminders
-        """
-        overdue = db.query(Invoice).filter(Invoice.status == "overdue").all()
-        
-        # Calculate total overdue amount
-        total_amount = sum(safe_float(inv.balance_amount) for inv in overdue)
-        
-        # Format each overdue invoice with reminder message
-        invoices_data = [
-            InvoiceService._format_overdue_invoice(inv, db) 
-            for inv in overdue
-        ]
-        
-        return {
-            "count": len(overdue),
-            "total_overdue_amount": total_amount,
-            "alert": InvoiceService._get_overdue_alert_message(len(overdue), total_amount),
-            "invoices": invoices_data
-        }
+    def get_overdue_invoices(db: Session, scope: dict) -> dict:
+        try:
+            q = db.query(Invoice).filter(Invoice.status == "overdue")
+
+            if scope["scope"] == "business":
+                q = q.join(Order, Invoice.order_id == Order.id).filter(
+                    Order.business_id == scope["business_id"]
+                )
+            elif scope["scope"] == "customer":
+                q = q.join(Order, Invoice.order_id == Order.id).filter(
+                    Order.customer_id == scope["customer_id"]
+                )
+
+            overdue = q.all()
+            total_amount = sum(safe_float(inv.balance_amount) for inv in overdue)
+
+            invoices_data = [
+                InvoiceService._format_overdue_invoice(inv, db) for inv in overdue
+            ]
+
+            return {
+                "count": len(overdue),
+                "total_overdue_amount": total_amount,
+                "alert": InvoiceService._get_overdue_alert_message(len(overdue), total_amount),
+                "invoices": invoices_data,
+            }
+        except Exception as e:
+            print(f"[invoice_service.get_overdue_invoices] {e}")
+            return {
+                "count": 0,
+                "total_overdue_amount": 0,
+                "alert": "",
+                "invoices": [],
+            }
     
     # ==================== PRIVATE HELPER METHODS ====================
     

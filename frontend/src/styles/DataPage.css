@@ -1,0 +1,282 @@
+.page-header {
+  margin-bottom: 32px;
+}
+
+.page-title {
+  font-size: 24px;
+  font-weight: 500;
+  letter-spacing: -0.5px;
+  color: #111827;
+  margin-bottom: 4px;
+}
+
+.page-subtitle {
+  font-size: 14px;
+  color: #6b7280;
+}
+
+.page-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  gap: 16px;
+}
+
+.search-input {
+  width: 280px;
+  max-width: 100%;
+  padding: 8px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #111827;
+  background: #fff;
+}
+
+.search-input:focus {
+  outline: none;
+  border-color: #111827;
+  box-shadow: 0 0 0 1px #111827;
+}
+
+.search-input::placeholder {
+  color: #9ca3af;
+}
+
+.filter-tabs {
+  display: flex;
+  gap: 4px;
+}
+
+.filter-tab {
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #6b7280;
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+
+.filter-tab:hover {
+  color: #111827;
+  background: #f9fafb;
+}
+
+.filter-tab.active {
+  color: #111827;
+  background: #f3f4f6;
+  border-color: #e5e7eb;
+}
+
+.data-table-wrap {
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.data-table thead {
+  background: #fafafa;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.data-table th {
+  padding: 10px 16px;
+  text-align: left;
+  font-weight: 500;
+  color: #6b7280;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+
+.data-table th.right,
+.data-table td.right {
+  text-align: right;
+}
+
+.data-table td {
+  padding: 12px 16px;
+  border-bottom: 1px solid #f3f4f6;
+  color: #374151;
+  vertical-align: middle;
+}
+
+.data-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.data-table tbody tr {
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+
+.data-table tbody tr:hover {
+  background: #fafafa;
+}
+
+.data-table tbody tr.selected {
+  background: #f9fafb;
+}
+
+.cell-primary {
+  color: #111827;
+  font-weight: 500;
+}
+
+.cell-muted {
+  color: #6b7280;
+  font-size: 12px;
+}
+
+.cell-mono {
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #374151;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.status-dot.red { background: #ef4444; }
+.status-dot.amber { background: #f59e0b; }
+.status-dot.green { background: #10b981; }
+.status-dot.gray { background: #9ca3af; }
+
+.empty-state-box {
+  padding: 48px 24px;
+  text-align: center;
+  color: #9ca3af;
+  font-size: 14px;
+}
+
+.loading-box {
+  display: flex;
+  justify-content: center;
+  padding: 80px 0;
+  color: #9ca3af;
+}
+
+/* Detail panel */
+.detail-layout {
+  display: grid;
+  grid-template-columns: 1fr 340px;
+  gap: 32px;
+  align-items: start;
+}
+
+.detail-panel {
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #fff;
+  padding: 20px;
+  position: sticky;
+  top: 80px;
+}
+
+.detail-panel-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #111827;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.detail-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 8px 0;
+  font-size: 13px;
+  border-bottom: 1px solid #f9fafb;
+}
+
+.detail-row:last-child {
+  border-bottom: none;
+}
+
+.detail-label {
+  color: #6b7280;
+  flex-shrink: 0;
+}
+
+.detail-value {
+  color: #111827;
+  text-align: right;
+  font-weight: 500;
+}
+
+.detail-section-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #9ca3af;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  margin: 16px 0 8px 0;
+}
+
+.detail-empty {
+  font-size: 13px;
+  color: #9ca3af;
+  padding: 12px 0;
+}
+
+.back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  color: #6b7280;
+  margin-bottom: 16px;
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 0;
+}
+
+.back-link:hover {
+  color: #111827;
+}
+
+@media (max-width: 900px) {
+  .detail-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .detail-panel {
+    position: static;
+  }
+
+  .page-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .search-input {
+    width: 100%;
+  }
+}

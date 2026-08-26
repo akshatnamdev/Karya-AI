@@ -1,6 +1,5 @@
 """
-Karya AI - Dashboard Service
-Business intelligence and dashboard-related queries
+Dashboard Service - now role-aware
 """
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -15,39 +14,25 @@ from app.utils.formatters import safe_float, format_currency
 
 
 class DashboardService:
-    """Handles all dashboard-related business logic"""
     
     @staticmethod
-    def get_dashboard_data(db: Session) -> dict:
-        """
-        Get complete dashboard with business info, metrics, and alerts
-        
-        Returns:
-            dict: {
-                "business": {...},
-                "summary": {...},
-                "alerts": [...]
-            }
-        """
+    def get_dashboard_data(db: Session, scope: dict) -> dict:
+        """Get dashboard data scoped to user's role"""
         return {
-            "business": DashboardService._get_business_info(db),
-            "summary": DashboardService._get_summary_metrics(db),
-            "alerts": DashboardService._get_smart_alerts(db)
+            "business": DashboardService._get_business_info(db, scope),
+            "summary": DashboardService._get_summary_metrics(db, scope),
+            "alerts": DashboardService._get_smart_alerts(db, scope),
         }
     
-    # ==================== PRIVATE HELPER METHODS ====================
-    
     @staticmethod
-    def _get_business_info(db: Session) -> dict:
-        """Get business information"""
-        business = db.query(Business).first()
+    def _get_business_info(db: Session, scope: dict) -> dict:
+        if scope["scope"] == "all":
+            count = db.query(Business).count()
+            return {"name": f"Platform ({count} businesses)", "type": "platform", "city": "—"}
         
+        business = db.query(Business).filter(Business.id == scope["business_id"]).first()
         if not business:
-            return {
-                "name": "N/A",
-                "type": "N/A", 
-                "city": "N/A"
-            }
+            return {"name": "N/A", "type": "N/A", "city": "N/A"}
         
         return {
             "name": business.name,
@@ -56,21 +41,34 @@ class DashboardService:
         }
     
     @staticmethod
-    def _get_summary_metrics(db: Session) -> dict:
-        """Get financial summary metrics"""
-        # Basic counts
-        total_customers = db.query(Customer).count()
-        total_products = db.query(Product).count()
-        total_orders = db.query(Order).count()
+    def _get_summary_metrics(db: Session, scope: dict) -> dict:
+        # Base queries
+        customer_q = db.query(Customer)
+        product_q = db.query(Product)
+        order_q = db.query(Order)
         
-        # Financial metrics
-        total_revenue = db.query(func.sum(Order.total_amount)).scalar()
-        total_outstanding = db.query(func.sum(Customer.outstanding_amount)).scalar()
+        if scope["scope"] == "business":
+            customer_q = customer_q.filter(Customer.business_id == scope["business_id"])
+            product_q = product_q.filter(Product.business_id == scope["business_id"])
+            order_q = order_q.filter(Order.business_id == scope["business_id"])
+        elif scope["scope"] == "customer":
+            customer_q = customer_q.filter(Customer.id == scope["customer_id"])
+            product_q = product_q.filter(Product.business_id == scope["business_id"])
+            order_q = order_q.filter(Order.customer_id == scope["customer_id"])
         
-        # Stock value
-        stock_value = db.query(
-            func.sum(Inventory.current_stock * Product.selling_price)
-        ).join(Product, Inventory.product_id == Product.id).scalar()
+        total_customers = customer_q.count()
+        total_products = product_q.count()
+        total_orders = order_q.count()
+        
+        total_revenue = order_q.with_entities(func.sum(Order.total_amount)).scalar()
+        total_outstanding = customer_q.with_entities(func.sum(Customer.outstanding_amount)).scalar()
+        
+        stock_q = db.query(func.sum(Inventory.current_stock * Product.selling_price)).join(
+            Product, Inventory.product_id == Product.id
+        )
+        if scope["scope"] in ("business", "customer"):
+            stock_q = stock_q.filter(Product.business_id == scope["business_id"])
+        stock_value = stock_q.scalar()
         
         return {
             "total_customers": total_customers,
@@ -82,72 +80,81 @@ class DashboardService:
         }
     
     @staticmethod
-    def _get_smart_alerts(db: Session) -> list:
-        """Generate intelligent alerts based on business state"""
+    def _get_smart_alerts(db: Session, scope: dict) -> list:
         alerts = []
         
-        # Check for overdue invoices
-        overdue_alert = DashboardService._check_overdue_invoices(db)
+        overdue_alert = DashboardService._check_overdue_invoices(db, scope)
         if overdue_alert:
             alerts.append(overdue_alert)
         
-        # Check for low stock
-        low_stock_alert = DashboardService._check_low_stock(db)
+        low_stock_alert = DashboardService._check_low_stock(db, scope)
         if low_stock_alert:
             alerts.append(low_stock_alert)
         
-        # Add orders processed summary (always shown)
-        orders_alert = DashboardService._get_orders_summary(db)
+        orders_alert = DashboardService._get_orders_summary(db, scope)
         alerts.append(orders_alert)
         
         return alerts
     
     @staticmethod
-    def _check_overdue_invoices(db: Session) -> dict:
-        """Check for overdue invoices and generate alert"""
-        overdue_count = db.query(Invoice).filter(
-            Invoice.status == "overdue"
-        ).count()
+    def _check_overdue_invoices(db: Session, scope: dict) -> dict:
+        q = db.query(Invoice).filter(Invoice.status == "overdue")
         
-        if overdue_count == 0:
+        if scope["scope"] == "business":
+            q = q.join(Order, Invoice.order_id == Order.id).filter(
+                Order.business_id == scope["business_id"]
+            )
+        elif scope["scope"] == "customer":
+            q = q.join(Order, Invoice.order_id == Order.id).filter(
+                Order.customer_id == scope["customer_id"]
+            )
+        
+        count = q.count()
+        if count == 0:
             return None
         
-        overdue_amount = db.query(func.sum(Invoice.balance_amount)).filter(
-            Invoice.status == "overdue"
-        ).scalar()
+        amount = q.with_entities(func.sum(Invoice.balance_amount)).scalar() or 0
         
         return {
             "icon": "🔴",
             "type": "danger",
-            "message": f"{overdue_count} overdue invoices worth ₹{safe_float(overdue_amount):,.0f}",
+            "message": f"{count} overdue invoices worth ₹{safe_float(amount):,.0f}",
             "priority": "high"
         }
     
     @staticmethod
-    def _check_low_stock(db: Session) -> dict:
-        """Check for low stock products and generate alert"""
-        low_stock_count = db.query(Inventory).filter(
-            Inventory.current_stock <= Inventory.reorder_level
-        ).count()
+    def _check_low_stock(db: Session, scope: dict) -> dict:
+        q = db.query(Inventory).filter(Inventory.current_stock <= Inventory.reorder_level)
         
-        if low_stock_count == 0:
+        if scope["scope"] in ("business", "customer"):
+            q = q.join(Product, Inventory.product_id == Product.id).filter(
+                Product.business_id == scope["business_id"]
+            )
+        
+        count = q.count()
+        if count == 0:
             return None
         
         return {
             "icon": "🟠",
             "type": "warning",
-            "message": f"{low_stock_count} products need reordering",
+            "message": f"{count} products need reordering",
             "priority": "medium"
         }
     
     @staticmethod
-    def _get_orders_summary(db: Session) -> dict:
-        """Get orders processed summary alert"""
-        total_orders = db.query(Order).count()
+    def _get_orders_summary(db: Session, scope: dict) -> dict:
+        q = db.query(Order)
         
+        if scope["scope"] == "business":
+            q = q.filter(Order.business_id == scope["business_id"])
+        elif scope["scope"] == "customer":
+            q = q.filter(Order.customer_id == scope["customer_id"])
+        
+        count = q.count()
         return {
             "icon": "🟢",
             "type": "success",
-            "message": f"{total_orders} orders processed successfully",
+            "message": f"{count} orders processed",
             "priority": "low"
         }
