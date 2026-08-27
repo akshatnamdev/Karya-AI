@@ -58,6 +58,43 @@ class ProductService:
                 for inv, product in low_stock
             ]
         }
+
+    @staticmethod
+    def create_product(db: Session, business_id: int, product_data: dict) -> dict:
+        """
+        Creates a product and its associated inventory record simultaneously.
+        Used by both Manual UI and AI Assistant.
+        """
+        # 1. Create the Product
+        new_product = Product(
+            business_id=business_id,
+            name=product_data["name"],
+            sku=product_data.get("sku"),
+            category=product_data.get("category"),
+            description=product_data.get("description"),
+            cost_price=product_data.get("cost_price", 0),
+            selling_price=product_data["selling_price"],
+            mrp=product_data.get("mrp"),
+            unit=product_data.get("unit", "pcs"),
+            is_active=True
+        )
+        db.add(new_product)
+        db.flush() # Flush to get the new_product.id
+
+        # 2. Create the Inventory tracking record
+        new_inventory = Inventory(
+            product_id=new_product.id,
+            current_stock=product_data.get("initial_stock", 0),
+            reorder_level=product_data.get("reorder_level", 10),
+            reorder_quantity=product_data.get("reorder_quantity", 50)
+        )
+        db.add(new_inventory)
+        
+        # 3. Commit transaction
+        db.commit()
+        db.refresh(new_product)
+        
+        return ProductService._format_product_with_stock(new_product, db)    
     
     # ==================== PRIVATE HELPERS ====================
     

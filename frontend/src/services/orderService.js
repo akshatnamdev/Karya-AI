@@ -15,6 +15,11 @@ export const orderService = {
     const response = await api.get('/api/orders/whatsapp');
     return response.data;
   },
+
+  async create(payload) {
+    const response = await api.post('/api/orders', payload);
+    return response.data;
+  },
 };
 
 export default orderService;

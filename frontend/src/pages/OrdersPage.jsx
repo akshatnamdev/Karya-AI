@@ -3,6 +3,9 @@ import Layout from '../components/Layout';
 import orderService from '../services/orderService';
 import { Loader2 } from 'lucide-react';
 import '../styles/DataPage.css';
+import { useAuth } from '../context/AuthContext'; // fix path if needed
+import PlaceOrderModal from '../components/PlaceOrderModal';
+import { Plus } from 'lucide-react';
 
 function OrdersPage() {
   const [orders, setOrders] = useState([]);
@@ -13,6 +16,9 @@ function OrdersPage() {
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('all');
   const [error, setError] = useState('');
+  const { isBusinessOwner, isCustomer } = useAuth();
+  const [showCreateOrder, setShowCreateOrder] = useState(false);
+  const canPlaceOrder = isBusinessOwner || isCustomer;
 
   useEffect(() => {
     loadOrders();
@@ -89,9 +95,34 @@ function OrdersPage() {
 
   return (
     <Layout>
-      <header className="page-header">
-        <h1 className="page-title">Orders</h1>
-        <p className="page-subtitle">{orders.length} orders total</p>
+      <header className="page-header" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+        <div>
+          <h1 className="page-title">Orders</h1>
+          <p className="page-subtitle">{orders.length} orders total</p>
+        </div>
+        {canPlaceOrder && (
+          <button
+            type="button"
+            onClick={() => setShowCreateOrder(true)}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              background: '#111827',
+              color: '#fff',
+              border: 'none',
+              borderRadius: 8,
+              padding: '8px 12px',
+              fontSize: 13,
+              fontWeight: 500,
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            <Plus size={16} />
+            {isBusinessOwner ? 'Create Order' : 'Place Order'}
+          </button>
+        )}
       </header>
 
       {error && (
@@ -215,6 +246,16 @@ function OrdersPage() {
           )}
         </aside>
       </div>
+            {canPlaceOrder && (
+        <PlaceOrderModal
+          open={showCreateOrder}
+          onClose={() => setShowCreateOrder(false)}
+          mode={isBusinessOwner ? 'business' : 'customer'}
+          onCreated={() => {
+            loadOrders();
+          }}
+        />
+      )}
     </Layout>
   );
 }

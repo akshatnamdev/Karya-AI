@@ -4,10 +4,13 @@ Order Service - role-aware
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
+import datetime
 from app.models.order import Order, OrderItem
 from app.models.customer import Customer
 from app.models.product import Product
 from app.utils.formatters import safe_float, safe_iso
+from app.models.inventory import Inventory 
+
 
 
 class OrderService:
@@ -58,6 +61,99 @@ class OrderService:
             "count": len(orders),
             "orders": [OrderService._format_whatsapp_order(o) for o in orders]
         }
+    @staticmethod
+    def create_unified_order(
+        db: Session, 
+        business_id: int, 
+        customer_id: int, 
+        items_data: list, 
+        source: str = "manual", 
+        notes: str = None
+    ) -> dict:
+        """
+        Unified order placement for Business UI, Customer UI, and AI Assistant.
+        Validates stock, calculates totals, deducts inventory, and saves order.
+        """
+        # 1. Generate Unique Order Number
+        timestamp = int(datetime.datetime.now().timestamp())
+        order_number = f"ORD-{timestamp}"
+
+        # 2. Initialize Order
+        new_order = Order(
+            order_number=order_number,
+            business_id=business_id,
+            customer_id=customer_id,
+            status="pending",
+            source=source,
+            notes=notes,
+            subtotal=0,
+            tax_amount=0,
+            total_amount=0
+        )
+        db.add(new_order)
+        db.flush() # Get the new_order.id
+
+        subtotal = 0
+
+        # 3. Process Items and Deduct Stock
+        for item in items_data:
+            product_id = item["product_id"]
+            qty = item["quantity"]
+
+            # Validate Product
+            product = db.query(Product).filter(
+                Product.id == product_id, 
+                Product.business_id == business_id,
+                Product.is_active == True
+            ).first()
+            
+            if not product:
+                db.rollback()
+                raise HTTPException(status_code=404, detail=f"Product ID {product_id} not found or inactive")
+
+            # Validate & Deduct Stock
+            inventory = db.query(Inventory).filter(Inventory.product_id == product_id).first()
+            if not inventory or inventory.current_stock < qty:
+                db.rollback()
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"Insufficient stock for '{product.name}'. Available: {inventory.current_stock if inventory else 0}"
+                )
+
+            # Calculate Item Total
+            unit_price = product.selling_price
+            item_total = unit_price * qty
+            subtotal += item_total
+
+            # Create Order Item
+            order_item = OrderItem(
+                order_id=new_order.id,
+                product_id=product.id,
+                quantity=qty,
+                unit_price=unit_price,
+                total=item_total
+            )
+            db.add(order_item)
+
+            # Deduct Inventory
+            inventory.current_stock -= qty
+
+        # 4. Finalize Order Totals
+        new_order.subtotal = subtotal
+        new_order.total_amount = subtotal # Assuming no tax logic yet as per simple flow
+
+        # 5. Commit Transaction
+        try:
+            db.commit()
+            db.refresh(new_order)
+        except Exception as e:
+            db.rollback()
+            raise HTTPException(status_code=500, detail="Database error during order creation")
+
+        # Return formatted order using your existing helper
+        return OrderService._format_order_detail(new_order, db)
+
+
     
     # ==================== PRIVATE HELPERS ====================
     

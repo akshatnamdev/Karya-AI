@@ -15,6 +15,11 @@ export const productService = {
     const response = await api.get(`/api/products/${id}`);
     return response.data;
   },
+
+  async create(payload) {
+    const response = await api.post('/api/products', payload);
+    return response.data;
+  },
 };
 
 export default productService;

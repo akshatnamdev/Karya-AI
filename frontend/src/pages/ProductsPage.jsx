@@ -3,6 +3,9 @@ import Layout from '../components/Layout';
 import productService from '../services/productService';
 import { Loader2 } from 'lucide-react';
 import '../styles/DataPage.css';
+import { useAuth } from '../context/AuthContext'; // adjust path if your file is contexts/AuthContext.jsx
+import AddProductModal from '../components/AddProductModal';
+import { Plus } from 'lucide-react';
 
 function ProductsPage() {
   const [products, setProducts] = useState([]);
@@ -11,6 +14,8 @@ function ProductsPage() {
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('all');
   const [error, setError] = useState('');
+  const { isBusinessOwner } = useAuth();
+  const [showAddProduct, setShowAddProduct] = useState(false);
 
   useEffect(() => {
     loadProducts();
@@ -80,11 +85,36 @@ function ProductsPage() {
 
   return (
     <Layout>
-      <header className="page-header">
-        <h1 className="page-title">Inventory</h1>
-        <p className="page-subtitle">
-          {products.length} products · {lowCount} need reordering
-        </p>
+      <header className="page-header" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+        <div>
+          <h1 className="page-title">Inventory</h1>
+          <p className="page-subtitle">
+            {products.length} products · {lowCount} need reordering
+          </p>
+        </div>
+        {isBusinessOwner && (
+          <button
+            type="button"
+            onClick={() => setShowAddProduct(true)}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              background: '#111827',
+              color: '#fff',
+              border: 'none',
+              borderRadius: 8,
+              padding: '8px 12px',
+              fontSize: 13,
+              fontWeight: 500,
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            <Plus size={16} />
+            Add Product
+          </button>
+        )}
       </header>
 
       {error && (
@@ -250,6 +280,15 @@ function ProductsPage() {
           )}
         </aside>
       </div>
+            {isBusinessOwner && (
+        <AddProductModal
+          open={showAddProduct}
+          onClose={() => setShowAddProduct(false)}
+          onCreated={() => {
+            loadProducts();
+          }}
+        />
+      )}
     </Layout>
   );
 }
