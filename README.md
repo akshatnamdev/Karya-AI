@@ -450,8 +450,8 @@ This project is licensed under the MIT License — see the [LICENSE](LICENSE) fi
 
 Have questions, feedback, or want to collaborate?
 
-- 📧 Email: your-email@example.com
-- 💼 LinkedIn: [Your LinkedIn](https://linkedin.com/in/YOUR-LINKEDIN)
+- 📧 Email: akshatnamdev23@gmail.com
+- 💼 LinkedIn: https://www.linkedin.com/in/akshatnamdev23/
 - 🐛 Issues: [GitHub Issues](https://github.com/akshatnamdev/Karya-AI/issues)
 
 ---
