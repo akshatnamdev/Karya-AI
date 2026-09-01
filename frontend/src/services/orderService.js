@@ -20,6 +20,13 @@ export const orderService = {
     const response = await api.post('/api/orders', payload);
     return response.data;
   },
+
+  // NEW
+  async updateStatus(orderId, payload) {
+    // payload: { status: 'confirmed'|'cancelled'|'delivered', note?: string }
+    const response = await api.patch(`/api/orders/${orderId}/status`, payload);
+    return response.data;
+  },
 };
 
-export default orderService;
+export default orderService;  

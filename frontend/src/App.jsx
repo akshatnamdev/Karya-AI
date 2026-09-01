@@ -16,12 +16,7 @@ import SupportPage from './pages/SupportPage';
 
 function RoleRoute({ children, allow }) {
   const { user, isAuthenticated } = useAuth();
-    <Route path="/support" element={
-  <RoleRoute allow={['business_owner', 'customer', 'platform_admin']}>
-  <a href="/support" style={{ color: '#111827', fontSize: 13, marginRight: 12 }}>Support</a>
-    <SupportPage />
-  </RoleRoute>
-} />
+
   if (!isAuthenticated) return <Navigate to="/login" replace />;
 
   const role = user?.role;
@@ -61,13 +56,23 @@ function AppRoutes() {
       <Route path="/register" element={<PublicRoute><RegisterPage /></PublicRoute>} />
       <Route path="/register-customer" element={<PublicRoute><CustomerRegisterPage /></PublicRoute>} />
 
-      {/* Business owner */}
+      {/* Business owner + shared */}
       <Route path="/dashboard" element={<RoleRoute allow={['business_owner']}><DashboardPage /></RoleRoute>} />
       <Route path="/assistant" element={<RoleRoute allow={['business_owner', 'customer']}><AssistantPage /></RoleRoute>} />
       <Route path="/customers" element={<RoleRoute allow={['business_owner']}><CustomersPage /></RoleRoute>} />
       <Route path="/products" element={<RoleRoute allow={['business_owner', 'customer']}><ProductsPage /></RoleRoute>} />
       <Route path="/orders" element={<RoleRoute allow={['business_owner', 'customer']}><OrdersPage /></RoleRoute>} />
       <Route path="/invoices" element={<RoleRoute allow={['business_owner', 'customer']}><InvoicesPage /></RoleRoute>} />
+
+      {/* Support — available to all authenticated roles */}
+      <Route
+        path="/support"
+        element={
+          <RoleRoute allow={['business_owner', 'customer', 'platform_admin']}>
+            <SupportPage />
+          </RoleRoute>
+        }
+      />
 
       {/* Admin — own layout inside page */}
       <Route path="/admin" element={<RoleRoute allow={['platform_admin']}><AdminHome /></RoleRoute>} />

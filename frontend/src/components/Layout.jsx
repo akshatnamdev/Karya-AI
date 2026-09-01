@@ -6,13 +6,12 @@ import '../styles/Layout.css';
 function Layout({ children }) {
   const { user, logout, isPlatformAdmin, isBusinessOwner, isCustomer } = useAuth();
 
-  // Build nav items based on role
   const navItems = [];
-  
+
   if (isPlatformAdmin) {
     navItems.push({ path: '/admin', label: 'Overview' });
   }
-  
+
   if (isBusinessOwner) {
     navItems.push(
       { path: '/dashboard', label: 'Overview' },
@@ -22,10 +21,9 @@ function Layout({ children }) {
       { path: '/invoices', label: 'Invoices' },
       { path: '/assistant', label: 'Assistant' },
       { path: '/support', label: 'Support' },
-      { path: '/support', label: 'Support' },
     );
   }
-  
+
   if (isCustomer) {
     navItems.push(
       { path: '/portal', label: 'Home' },
@@ -33,6 +31,7 @@ function Layout({ children }) {
       { path: '/orders', label: 'My Orders' },
       { path: '/invoices', label: 'My Invoices' },
       { path: '/assistant', label: 'Assistant' },
+      { path: '/support', label: 'Support' },
     );
   }
 
@@ -46,7 +45,7 @@ function Layout({ children }) {
     <div className="app-layout">
       <header className="top-nav">
         <div className="nav-container">
-          
+
           <div className="nav-left">
             <div className="nav-brand">
               <Command size={16} /> Karya
@@ -67,7 +66,7 @@ function Layout({ children }) {
                 <NavLink
                   key={item.path}
                   to={item.path}
-                  className={({isActive}) => isActive ? "nav-link active" : "nav-link"}
+                  className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}
                 >
                   {item.label}
                 </NavLink>
@@ -82,7 +81,7 @@ function Layout({ children }) {
 
         </div>
       </header>
-      
+
       <main className="main-container">
         {children}
       </main>

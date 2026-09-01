@@ -1,10 +1,24 @@
 import { useState, useEffect, useMemo } from 'react';
 import Layout from '../components/Layout';
 import invoiceService from '../services/invoiceService';
+import { useAuth } from '../context/AuthContext'; // change path if your AuthContext lives elsewhere
 import { Loader2 } from 'lucide-react';
 import '../styles/DataPage.css';
 
+const btnPrimary = {
+  background: '#111827',
+  color: '#fff',
+  border: 'none',
+  borderRadius: 8,
+  padding: '8px 12px',
+  fontSize: 13,
+  fontWeight: 500,
+  cursor: 'pointer',
+};
+
 function InvoicesPage() {
+  const { isBusinessOwner } = useAuth();
+
   const [invoices, setInvoices] = useState([]);
   const [overdue, setOverdue] = useState(null);
   const [selected, setSelected] = useState(null);
@@ -14,6 +28,14 @@ function InvoicesPage() {
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('all');
   const [error, setError] = useState('');
+
+  // Payment UI state (business only)
+  const [payAmount, setPayAmount] = useState('');
+  const [payMethod, setPayMethod] = useState('manual');
+  const [payNote, setPayNote] = useState('');
+  const [payLoading, setPayLoading] = useState(false);
+  const [payError, setPayError] = useState('');
+  const [paySuccess, setPaySuccess] = useState('');
 
   useEffect(() => {
     loadData();
@@ -41,6 +63,11 @@ function InvoicesPage() {
     setSelected(invoice);
     setDetailLoading(true);
     setDetail(null);
+    setPayError('');
+    setPaySuccess('');
+    setPayAmount('');
+    setPayNote('');
+    setPayMethod('manual');
     try {
       const data = await invoiceService.getById(invoice.id);
       setDetail(data);
@@ -48,6 +75,69 @@ function InvoicesPage() {
       console.error(err);
     } finally {
       setDetailLoading(false);
+    }
+  };
+
+  const syncSelectedFromDetail = (data) => {
+    const inv = data?.invoice || {};
+    setSelected((prev) => ({
+      ...(prev || {}),
+      id: inv.id ?? prev?.id,
+      invoice_number: inv.invoice_number ?? prev?.invoice_number,
+      status: inv.status ?? prev?.status,
+      total: inv.total ?? prev?.total,
+      paid: inv.paid ?? prev?.paid,
+      balance: inv.balance ?? prev?.balance,
+      invoice_date: inv.invoice_date ?? prev?.invoice_date,
+      due_date: inv.due_date ?? prev?.due_date,
+      customer: data?.customer?.name ?? prev?.customer,
+      customer_phone: data?.customer?.phone ?? prev?.customer_phone,
+    }));
+  };
+
+  const handleRecordPayment = async () => {
+    if (!selected?.id || !isBusinessOwner) return;
+
+    setPayError('');
+    setPaySuccess('');
+
+    const amount = Number(payAmount);
+    if (!amount || amount <= 0) {
+      setPayError('Enter a valid payment amount');
+      return;
+    }
+
+    const balance = Number(selected.balance ?? detail?.invoice?.balance ?? 0);
+    if (balance > 0 && amount > balance + 0.001) {
+      setPayError(`Amount cannot exceed balance (${balance})`);
+      return;
+    }
+
+    try {
+      setPayLoading(true);
+      const data = await invoiceService.recordPayment(selected.id, {
+        amount,
+        payment_method: payMethod || 'manual',
+        note: payNote || 'Recorded from Invoices UI',
+      });
+
+      setPaySuccess('Payment recorded successfully');
+      setPayAmount('');
+      setPayNote('');
+      setDetail(data);
+      syncSelectedFromDetail(data);
+      await loadData();
+    } catch (err) {
+      const detailMsg = err.response?.data?.detail;
+      setPayError(
+        typeof detailMsg === 'string'
+          ? detailMsg
+          : Array.isArray(detailMsg)
+            ? detailMsg.map((d) => d.msg || JSON.stringify(d)).join(', ')
+            : err.message || 'Failed to record payment'
+      );
+    } finally {
+      setPayLoading(false);
     }
   };
 
@@ -79,6 +169,13 @@ function InvoicesPage() {
     if (status === 'partially_paid' || status === 'sent') return 'amber';
     return 'gray';
   };
+
+  const canRecordPayment =
+    isBusinessOwner &&
+    selected &&
+    selected.status !== 'paid' &&
+    selected.status !== 'cancelled' &&
+    Number(selected.balance ?? 0) > 0;
 
   if (loading) {
     return (
@@ -216,6 +313,13 @@ function InvoicesPage() {
                 </span>
               </div>
 
+              {detail?.order?.order_number && (
+                <div className="detail-row">
+                  <span className="detail-label">Order</span>
+                  <span className="detail-value">{detail.order.order_number}</span>
+                </div>
+              )}
+
               <div className="detail-section-label">Amounts</div>
               <div className="detail-row">
                 <span className="detail-label">Total</span>
@@ -253,6 +357,71 @@ function InvoicesPage() {
                     )?.suggested_reminder || '—'}
                   </div>
                 </>
+              )}
+
+              {/* ===== BUSINESS: RECORD PAYMENT ===== */}
+              {canRecordPayment && (
+                <>
+                  <div className="detail-section-label">Record payment</div>
+
+                  {payError && (
+                    <div style={{ color: '#991b1b', fontSize: 12, marginBottom: 8 }}>
+                      {String(payError)}
+                    </div>
+                  )}
+                  {paySuccess && (
+                    <div style={{ color: '#166534', fontSize: 12, marginBottom: 8 }}>
+                      {paySuccess}
+                    </div>
+                  )}
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <input
+                      className="search-input"
+                      type="number"
+                      min="1"
+                      step="0.01"
+                      placeholder={`Amount (max ${selected.balance})`}
+                      value={payAmount}
+                      onChange={(e) => setPayAmount(e.target.value)}
+                    />
+                    <select
+                      className="search-input"
+                      value={payMethod}
+                      onChange={(e) => setPayMethod(e.target.value)}
+                    >
+                      <option value="manual">Manual</option>
+                      <option value="cash">Cash</option>
+                      <option value="upi">UPI</option>
+                      <option value="bank">Bank transfer</option>
+                      <option value="razorpay">Razorpay</option>
+                    </select>
+                    <input
+                      className="search-input"
+                      type="text"
+                      placeholder="Note (optional)"
+                      value={payNote}
+                      onChange={(e) => setPayNote(e.target.value)}
+                    />
+                    <button
+                      type="button"
+                      style={btnPrimary}
+                      disabled={payLoading}
+                      onClick={handleRecordPayment}
+                    >
+                      {payLoading ? 'Saving…' : 'Record payment'}
+                    </button>
+                    <div style={{ fontSize: 11, color: '#6b7280' }}>
+                      Partial payments supported. Razorpay can use the same API later.
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {isBusinessOwner && selected.status === 'paid' && (
+                <div style={{ marginTop: 12, fontSize: 12, color: '#166534' }}>
+                  Fully paid
+                </div>
               )}
             </>
           )}

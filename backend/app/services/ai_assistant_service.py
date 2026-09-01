@@ -11,6 +11,7 @@ from typing import Optional, List, Any
 
 from sqlalchemy.orm import Session
 
+
 from app.services.ai_service import ai_service
 from app.services.ai_cache_service import AICache
 from app.services.demo_mode_service import DemoModeService
@@ -20,7 +21,9 @@ from app.models.product import Product
 from app.models.customer import Customer
 from app.rag.business_context import BusinessContextBuilder
 from app.schemas.ai import AIQuery, AIResponse
-
+from app.services.invoice_service import InvoiceService
+from app.models.order import Order
+from app.models.invoice import Invoice
 
 class AIAssistantService:
     """AI Business Assistant with caching, demo mode, actions, and fallback"""
@@ -143,7 +146,245 @@ class AIAssistantService:
         if intent == "update_stock":
             return AIAssistantService._handle_update_stock(db, query, scope, start_time)
 
+        if intent == "confirm_order":
+            return AIAssistantService._handle_order_status(db, query, scope, start_time, "confirmed")
+
+        if intent == "deliver_order":
+            return AIAssistantService._handle_order_status(db, query, scope, start_time, "delivered")
+
+        if intent == "cancel_order":
+            return AIAssistantService._handle_order_status(db, query, scope, start_time, "cancelled")
+
+        if intent == "record_payment":
+            return AIAssistantService._handle_record_payment(db, query, scope, start_time)
+
         return None
+
+    @staticmethod
+    def _extract_order_ref(text: str):
+        """Find ORD-xxxxx, bare timestamp, or #id from text."""
+        if not text:
+            return None
+        t = text.strip()
+
+        m = re.search(r"ord[-\s]?(\d{3,})", t, re.IGNORECASE)
+        if m:
+            return f"ORD-{m.group(1)}"
+
+        m = re.search(r"\border\s+#?(\d{1,6})\b", t, re.IGNORECASE)
+        if m:
+            return m.group(1)
+
+        m = re.search(r"\b(\d{6,})\b", t)  # long timestamp
+        if m:
+            return m.group(1)
+
+        m = re.search(r"#(\d{1,6})\b", t)
+        if m:
+            return m.group(1)
+
+        return None
+
+    @staticmethod
+    def _extract_invoice_ref(text: str):
+        if not text:
+            return None
+        t = text.strip()
+        m = re.search(r"inv[-\s]?([\w-]+)", t, re.IGNORECASE)
+        if m:
+            return f"INV-{m.group(1)}" if not m.group(1).upper().startswith("INV") else m.group(1)
+        m = re.search(r"invoice\s+#?(\d{1,6})", t, re.IGNORECASE)
+        if m:
+            return m.group(1)
+        return None
+
+    @staticmethod
+    def _extract_amount(text: str):
+        if not text:
+            return None
+        # ₹300, 300, 300.50, "rs 300"
+        m = re.search(r"(?:₹|rs\.?\s*)?(\d+(?:\.\d{1,2})?)", text, re.IGNORECASE)
+        if m:
+            try:
+                return float(m.group(1))
+            except ValueError:
+                return None
+        return None
+
+    @staticmethod
+    def _resolve_order_pk(db, business_id, customer_id, role, ref):
+        """Return DB order id from ref (ORD-.. / timestamp / id)."""
+        if not ref:
+            return None
+        ref = str(ref).strip()
+
+        q = db.query(Order)
+        if role == "business" and business_id:
+            q = q.filter(Order.business_id == business_id)
+        elif role == "customer" and customer_id:
+            q = q.filter(Order.customer_id == customer_id)
+
+        # by order_number
+        o = q.filter(Order.order_number == ref).first()
+        if o:
+            return o.id
+        if not ref.upper().startswith("ORD-"):
+            o2 = q.filter(Order.order_number == f"ORD-{ref}").first()
+            if o2:
+                return o2.id
+        if ref.isdigit():
+            o3 = q.filter(Order.id == int(ref)).first()
+            if o3:
+                return o3.id
+        return None
+
+    @staticmethod
+    def _resolve_invoice_pk(db, business_id, ref):
+        if not ref:
+            return None
+        ref = str(ref).strip()
+        q = (
+            db.query(Invoice)
+            .join(Order, Invoice.order_id == Order.id)
+            .filter(Order.business_id == business_id)
+        )
+        inv = q.filter(Invoice.invoice_number == ref).first()
+        if inv:
+            return inv.id
+        if not ref.upper().startswith("INV-"):
+            inv2 = q.filter(Invoice.invoice_number == f"INV-{ref}").first()
+            if inv2:
+                return inv2.id
+        if ref.isdigit():
+            inv3 = q.filter(Invoice.id == int(ref)).first()
+            if inv3:
+                return inv3.id
+        return None
+
+    @staticmethod
+    def _handle_order_status(db, query, scope, start_time, new_status):
+        role = scope.get("scope")
+        business_id = scope.get("business_id")
+        customer_id = scope.get("customer_id")
+
+        ref = AIAssistantService._extract_order_ref(query.question)
+        if not ref:
+            return AIAssistantService._action_answer(
+                query,
+                start_time,
+                f"Which order should I {new_status.replace('ed','')}? "
+                f"Please give the order number.\nExample: {new_status} order ORD-1787868587",
+            )
+
+        order_pk = AIAssistantService._resolve_order_pk(
+            db, business_id, customer_id, role, ref
+        )
+        if not order_pk:
+            return AIAssistantService._action_answer(
+                query, start_time, f"I couldn't find order '{ref}' in your account."
+            )
+
+        try:
+            result = OrderService.update_status(
+                db=db,
+                order_id=order_pk,
+                new_status=new_status,
+                scope=scope,
+                note="via AI assistant",
+            )
+            AIAssistantService._invalidate_cache(scope)
+        except Exception as e:
+            detail = getattr(e, "detail", None) or str(e)
+            return AIAssistantService._action_answer(
+                query, start_time, f"Could not update order: {detail}"
+            )
+
+        order = result.get("order") or {}
+        lines = [
+            f"✅ Order {new_status}.",
+            f"- **Order:** {order.get('order_number')}",
+            f"- **Status:** {order.get('status')}",
+            f"- **Total:** ₹{order.get('total')}",
+        ]
+        if order.get("invoice_number"):
+            lines.append(f"- **Invoice:** {order.get('invoice_number')}")
+            if order.get("invoice_balance") is not None:
+                lines.append(f"- **Invoice balance:** ₹{order.get('invoice_balance')}")
+
+        return AIAssistantService._action_answer(
+            query,
+            start_time,
+            "\n".join(lines),
+            sources=["orders table", "invoices table"],
+        )
+
+    @staticmethod
+    def _handle_record_payment(db, query, scope, start_time):
+        if scope.get("scope") != "business":
+            return AIAssistantService._action_answer(
+                query, start_time, "Only business can record payments."
+            )
+
+        business_id = scope.get("business_id")
+        if not business_id:
+            return AIAssistantService._action_answer(
+                query, start_time, "Business context missing. Please log in again."
+            )
+
+        inv_ref = AIAssistantService._extract_invoice_ref(query.question)
+        amount = AIAssistantService._extract_amount(query.question)
+
+        missing = []
+        if not inv_ref:
+            missing.append("invoice number")
+        if not amount:
+            missing.append("amount")
+
+        if missing:
+            return AIAssistantService._action_answer(
+                query,
+                start_time,
+                f"Need {', '.join(missing)}.\n"
+                "Example: record payment of 300 on INV-1788246151",
+            )
+
+        invoice_pk = AIAssistantService._resolve_invoice_pk(db, business_id, inv_ref)
+        if not invoice_pk:
+            return AIAssistantService._action_answer(
+                query, start_time, f"I couldn't find invoice '{inv_ref}'."
+            )
+
+        try:
+            result = InvoiceService.record_payment(
+                db=db,
+                invoice_id=invoice_pk,
+                amount=amount,
+                scope=scope,
+                payment_method="ai",
+                note="via AI assistant",
+            )
+            AIAssistantService._invalidate_cache(scope)
+        except Exception as e:
+            detail = getattr(e, "detail", None) or str(e)
+            return AIAssistantService._action_answer(
+                query, start_time, f"Could not record payment: {detail}"
+            )
+
+        inv = result.get("invoice") or {}
+        answer = (
+            f"✅ Payment recorded.\n"
+            f"- **Invoice:** {inv.get('invoice_number')}\n"
+            f"- **Paid now:** ₹{amount}\n"
+            f"- **Total paid:** ₹{inv.get('paid')}\n"
+            f"- **Balance:** ₹{inv.get('balance')}\n"
+            f"- **Status:** {inv.get('status')}"
+        )
+        return AIAssistantService._action_answer(
+            query,
+            start_time,
+            answer,
+            sources=["invoices table", "customers table"],
+        )
 
     @staticmethod
     def _detect_action_intent(question: str, role: str):
@@ -227,7 +468,25 @@ class AIAssistantService:
 
         if role == "business" and any(k in q for k in stock_keys):
             return "update_stock"
+        
+        confirm_keys = ["confirm order", "confirm the order", "approve order", "confirm ord"]
+        deliver_keys = ["mark delivered", "deliver order", "order delivered", "mark order delivered", "delivered order"]
+        cancel_keys = ["cancel order", "cancel the order", "cancel ord"]
+        payment_keys = ["record payment", "add payment", "mark payment", "payment received", "received payment", "pay invoice", "record a payment"]
 
+        # Business: confirm / deliver / payment
+        if role == "business":
+            if any(k in q for k in confirm_keys):
+                return "confirm_order"
+            if any(k in q for k in deliver_keys):
+                return "deliver_order"
+            if any(k in q for k in payment_keys):
+                return "record_payment"
+
+        # Both roles: cancel
+        if role in ("business", "customer") and any(k in q for k in cancel_keys):
+            return "cancel_order"
+        
         if role in ("business", "customer") and any(k in q for k in place_order_keys):
             return "place_order"
 
@@ -800,12 +1059,14 @@ Your job is to help them check their order status, pending invoices, or browse a
 If the customer says hello, asks for help, or asks general questions, be welcoming and let them know you can help them check their orders, pending bills, or product catalog.
 They can also place orders by saying things like "place order for 2 Notebook".
 When order placement is handled by the system action layer, do not invent fake order confirmations in normal Q&A.
-If they ask about other customers or business internal data, politely inform them you can only share details related to their own account."""
+If they ask about other customers or business internal data, politely inform them you can only share details related to their own account.
+They can cancel their own pending order ("cancel order ORD-123")."""
         elif role == "business":
             persona = """You are Karya, an intelligent business assistant for the BUSINESS OWNER.
 You have access to the full business performance data, financials, inventory, and customer account details. Help the owner manage their business effectively.
 They can add products ("add product Notebook price 50 stock 100"), place orders ("place order for customer Ramesh: 2 Notebook"), and update stock ("restock Paracetamol by 50").
-Never pretend an order/product/stock change succeeded unless the system action layer already did it."""
+Never pretend an order/product/stock change succeeded unless the system action layer already did it.
+They can also confirm/deliver/cancel orders ("confirm order ORD-123", "mark ORD-123 delivered") and record payments ("record payment of 300 on INV-456")."""
         else:
             persona = "You are Karya, a Platform Admin assistant with system-wide visibility."
 

@@ -1,8 +1,10 @@
 """
 Invoice Routes
 """
-from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
+from typing import Optional
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 
 from app.db.database import get_db
 from app.core.dependencies import get_current_user, get_business_scope
@@ -12,6 +14,12 @@ from app.services.invoice_service import InvoiceService
 
 router = APIRouter(prefix="/api/invoices", tags=["Invoices"])
 
+
+class InvoicePaymentRequest(BaseModel):
+    amount: float = Field(gt=0)
+    payment_method: Optional[str] = "manual"  # manual | cash | upi | razorpay (later)
+    note: Optional[str] = None
+    reference: Optional[str] = None  # razorpay payment id later
 
 @router.get("")
 def get_invoices(
@@ -30,6 +38,27 @@ def get_overdue_invoices(
 ):
     return InvoiceService.get_overdue_invoices(db, scope)
 
+@router.post("/{invoice_id}/payments")
+def record_invoice_payment(
+    invoice_id: int,
+    payload: InvoicePaymentRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    scope: dict = Depends(get_business_scope),
+):
+    """
+    Business records full/partial payment.
+    Razorpay can call the same InvoiceService.record_payment later.
+    """
+    return InvoiceService.record_payment(
+        db=db,
+        invoice_id=invoice_id,
+        amount=payload.amount,
+        scope=scope,
+        payment_method=payload.payment_method or "manual",
+        note=payload.note,
+        reference=payload.reference,
+    )
 
 @router.get("/{invoice_id}")
 def get_invoice(

@@ -19,10 +19,39 @@ function OrdersPage() {
   const { isBusinessOwner, isCustomer } = useAuth();
   const [showCreateOrder, setShowCreateOrder] = useState(false);
   const canPlaceOrder = isBusinessOwner || isCustomer;
+  const [actionLoading, setActionLoading] = useState(false);
+  const [actionError, setActionError] = useState('');
 
   useEffect(() => {
     loadOrders();
   }, []);
+
+  const handleStatusUpdate = async (nextStatus) => {
+    if (!selected?.id) return;
+    setActionError('');
+    setActionLoading(true);
+    try {
+      const data = await orderService.updateStatus(selected.id, {
+        status: nextStatus,
+        note: `Updated via UI`,
+      });
+      await loadOrders();
+      // refresh detail
+      const refreshed = await orderService.getById(selected.id);
+      setDetail(refreshed);
+      setSelected((prev) => ({
+        ...prev,
+        status: refreshed?.order?.status || nextStatus,
+        total: refreshed?.order?.total ?? prev.total,
+      }));
+    } catch (err) {
+      setActionError(
+        err.response?.data?.detail || err.message || 'Failed to update order'
+      );
+    } finally {
+      setActionLoading(false);
+    }
+  };
 
   const loadOrders = async () => {
     try {
@@ -79,9 +108,30 @@ function OrdersPage() {
   const statusDot = (status) => {
     if (status === 'delivered') return 'green';
     if (status === 'cancelled') return 'red';
-    if (status === 'pending' || status === 'processing') return 'amber';
+    if (status === 'confirmed' || status === 'processing' || status === 'shipped') return 'gray';
+    if (status === 'pending') return 'amber';
     return 'gray';
   };
+
+const btnPrimary = {
+  background: '#111827',
+  color: '#fff',
+  border: 'none',
+  borderRadius: 8,
+  padding: '8px 12px',
+  fontSize: 13,
+  cursor: 'pointer',
+};
+
+const btnDanger = {
+  background: '#fff',
+  color: '#991b1b',
+  border: '1px solid #fecaca',
+  borderRadius: 8,
+  padding: '8px 12px',
+  fontSize: 13,
+  cursor: 'pointer',
+};
 
   if (loading) {
     return (
@@ -224,6 +274,85 @@ function OrdersPage() {
                   <div className="detail-section-label">Original message</div>
                   <div style={{ fontSize: 13, color: '#374151', lineHeight: 1.5 }}>
                     {detail?.order?.original_message || selected.whatsapp_message}
+                  </div>
+                </>
+              )}
+                            {actionError && (
+                <div style={{ color: '#991b1b', fontSize: 12, margin: '8px 0' }}>
+                  {String(actionError)}
+                </div>
+              )}
+
+              {/* Business actions */}
+              {isBusinessOwner && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
+                  {selected.status === 'pending' && (
+                    <button
+                      type="button"
+                      disabled={actionLoading}
+                      onClick={() => handleStatusUpdate('confirmed')}
+                      style={btnPrimary}
+                    >
+                      {actionLoading ? '…' : 'Confirm order'}
+                    </button>
+                  )}
+                  {(selected.status === 'confirmed' ||
+                    selected.status === 'processing' ||
+                    selected.status === 'shipped') && (
+                    <button
+                      type="button"
+                      disabled={actionLoading}
+                      onClick={() => handleStatusUpdate('delivered')}
+                      style={btnPrimary}
+                    >
+                      Mark delivered
+                    </button>
+                  )}
+                  {selected.status !== 'delivered' &&
+                    selected.status !== 'cancelled' && (
+                      <button
+                        type="button"
+                        disabled={actionLoading}
+                        onClick={() => handleStatusUpdate('cancelled')}
+                        style={btnDanger}
+                      >
+                        Cancel
+                      </button>
+                    )}
+                </div>
+              )}
+
+              {/* Customer: cancel only pending */}
+              {isCustomer && selected.status === 'pending' && (
+                <div style={{ marginTop: 12 }}>
+                  <button
+                    type="button"
+                    disabled={actionLoading}
+                    onClick={() => handleStatusUpdate('cancelled')}
+                    style={btnDanger}
+                  >
+                    Cancel order
+                  </button>
+                </div>
+              )}
+
+              {/* Invoice link info when confirmed */}
+              {(detail?.order?.invoice_number || selected.status === 'confirmed') && (
+                <>
+                  <div className="detail-section-label">Invoice</div>
+                  <div className="detail-row">
+                    <span className="detail-label">Number</span>
+                    <span className="detail-value">
+                      {detail?.order?.invoice_number || '—'}
+                    </span>
+                  </div>
+                  <div className="detail-row">
+                    <span className="detail-label">Balance</span>
+                    <span className="detail-value">
+                      {detail?.order?.invoice_balance != null
+                        ? formatMoney(detail.order.invoice_balance)
+                        : '—'}
+                    </span>
                   </div>
                 </>
               )}

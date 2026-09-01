@@ -26,6 +26,9 @@ class OrderCreateRequest(BaseModel):
     notes: Optional[str] = None
     source: Optional[str] = "manual"
 
+class OrderStatusUpdateRequest(BaseModel):
+    status: str  # confirmed | cancelled | delivered
+    note: Optional[str] = None
 
 @router.get("")
 def get_orders(
@@ -96,6 +99,21 @@ def create_order(
         notes=payload.notes,
     )
 
+@router.patch("/{order_id}/status")
+def update_order_status(
+    order_id: str,
+    payload: OrderStatusUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    scope: dict = Depends(get_business_scope),
+):
+    return OrderService.update_status(
+        db=db,
+        order_id=order_id,
+        new_status=payload.status,
+        scope=scope,
+        note=payload.note,
+    )
 
 @router.get("/{order_id}")
 def get_order(

@@ -40,33 +40,48 @@ class InvoiceService:
                 )
 
             invoices = q.all()
-            return [InvoiceService._format_invoice(inv, db) for inv in invoices]
+            for inv in invoices:
+                InvoiceService._refresh_overdue_status(inv)
+            try:
+                db.commit()
+            except Exception:
+                db.rollback()
+            return [InvoiceService._format_invoice(inv, db) for inv in invoices]   
         except Exception as e:
             print(f"[invoice_service.get_all_invoices] {e}")
+            
             return []
     
     @staticmethod
-    def get_invoice_detail(db: Session, invoice_id: int) -> dict:
-        """
-        Get detailed invoice info
-        
-        Args:
-            invoice_id: ID of the invoice
-            
-        Returns:
-            dict: Complete invoice details
-            
-        Raises:
-            HTTPException: 404 if invoice not found
-        """
-        invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
-        
+    def get_invoice_detail(db: Session, invoice_id: int, scope: dict = None) -> dict:
+        """Get detailed invoice info (scoped)."""
+        q = db.query(Invoice).filter(Invoice.id == invoice_id)
+
+        if scope:
+            role = scope.get("scope")
+            if role == "business" and scope.get("business_id"):
+                q = q.join(Order, Invoice.order_id == Order.id).filter(
+                    Order.business_id == scope["business_id"]
+                )
+            elif role == "customer" and scope.get("customer_id"):
+                q = q.join(Order, Invoice.order_id == Order.id).filter(
+                    Order.customer_id == scope["customer_id"]
+                )
+
+        invoice = q.first()
         if not invoice:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Invoice with ID {invoice_id} not found"
+                detail=f"Invoice with ID {invoice_id} not found",
             )
-        
+
+        # Auto-mark overdue on read (no separate cron needed)
+        InvoiceService._refresh_overdue_status(invoice)
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+
         return InvoiceService._format_invoice_detail(invoice, db)
     
     @staticmethod
@@ -104,7 +119,117 @@ class InvoiceService:
                 "alert": "",
                 "invoices": [],
             }
-    
+
+    @staticmethod
+    def _refresh_overdue_status(invoice: Invoice) -> None:
+        """If unpaid/partial and past due_date => overdue."""
+        st = (invoice.status or "").lower()
+        if st in ("paid", "cancelled", "draft"):
+            return
+        bal = safe_float(invoice.balance_amount)
+        if bal <= 0:
+            return
+        if invoice.due_date and invoice.due_date < date.today():
+            invoice.status = "overdue"
+
+    @staticmethod
+    def record_payment(
+        db: Session,
+        invoice_id: int,
+        amount: float,
+        scope: dict,
+        payment_method: str = "manual",
+        note: str = None,
+        reference: str = None,
+    ) -> dict:
+        """
+        Business records a payment against an invoice.
+        - Updates paid_amount / balance_amount / status
+        - Reduces customer.outstanding_amount
+        - Razorpay-ready: pass payment_method='razorpay' + reference=payment_id later
+
+        Used by UI + AI. Same function for all callers.
+        """
+        if scope.get("scope") != "business":
+            raise HTTPException(status_code=403, detail="Only business can record payments")
+
+        business_id = scope.get("business_id")
+        if not business_id:
+            raise HTTPException(status_code=400, detail="Business context missing")
+
+        try:
+            amount = float(amount)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="Invalid payment amount")
+
+        if amount <= 0:
+            raise HTTPException(status_code=400, detail="Payment amount must be > 0")
+
+        q = (
+            db.query(Invoice)
+            .join(Order, Invoice.order_id == Order.id)
+            .filter(Invoice.id == invoice_id, Order.business_id == business_id)
+        )
+        invoice = q.first()
+        if not invoice:
+            raise HTTPException(status_code=404, detail="Invoice not found")
+
+        st = (invoice.status or "").lower()
+        if st == "cancelled":
+            raise HTTPException(status_code=400, detail="Cannot pay a cancelled invoice")
+        if st == "paid" or safe_float(invoice.balance_amount) <= 0:
+            raise HTTPException(status_code=400, detail="Invoice is already fully paid")
+
+        balance = safe_float(invoice.balance_amount)
+        if amount > balance + 0.001:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Amount ₹{amount} exceeds balance ₹{balance}",
+            )
+
+        paid = safe_float(invoice.paid_amount) + amount
+        new_balance = round(safe_float(invoice.total_amount) - paid, 2)
+        if new_balance < 0:
+            new_balance = 0
+
+        invoice.paid_amount = paid
+        invoice.balance_amount = new_balance
+
+        if new_balance <= 0:
+            invoice.status = "paid"
+            invoice.paid_date = date.today()
+        else:
+            # keep overdue if still past due, else partially_paid
+            if invoice.due_date and invoice.due_date < date.today():
+                invoice.status = "overdue"
+            else:
+                invoice.status = "partially_paid"
+
+        # Append note (no Payment table required yet; Razorpay can add later)
+        extra = f"[payment] method={payment_method or 'manual'} amount={amount}"
+        if reference:
+            extra += f" ref={reference}"
+        if note:
+            extra += f" note={note}"
+        invoice.notes = ((invoice.notes or "") + "\n" + extra).strip()
+
+        # Reduce customer outstanding
+        order = db.query(Order).filter(Order.id == invoice.order_id).first()
+        if order:
+            customer = db.query(Customer).filter(Customer.id == order.customer_id).first()
+            if customer:
+                out = safe_float(customer.outstanding_amount) - amount
+                customer.outstanding_amount = out if out > 0 else 0
+
+        try:
+            db.commit()
+            db.refresh(invoice)
+        except Exception:
+            db.rollback()
+            raise HTTPException(status_code=500, detail="Failed to record payment")
+
+        return InvoiceService._format_invoice_detail(invoice, db)
+
     # ==================== PRIVATE HELPER METHODS ====================
     
     @staticmethod
