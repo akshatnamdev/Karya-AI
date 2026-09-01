@@ -20,6 +20,10 @@ export const productService = {
     const response = await api.post('/api/products', payload);
     return response.data;
   },
+  async updateStock(productId, payload) {
+    const response = await api.patch(`/api/products/${productId}/stock`, payload);
+    return response.data;
+  },
 };
 
 export default productService;

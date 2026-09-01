@@ -33,6 +33,38 @@ class ProductCreateRequest(BaseModel):
     is_active: Optional[bool] = True
 
 
+class StockUpdateRequest(BaseModel):
+    mode: str = "add"          # set | add | remove
+    quantity: int
+    reason: Optional[str] = None
+
+@router.patch("/{product_id}/stock")
+def update_product_stock(
+    product_id: int,
+    payload: StockUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    scope: dict = Depends(get_business_scope),
+):
+    """
+    BUSINESS: Update stock (set / add / remove)
+    """
+    if scope.get("scope") != "business":
+        raise HTTPException(status_code=403, detail="Only business users can update stock")
+
+    business_id = scope.get("business_id")
+    if not business_id:
+        raise HTTPException(status_code=400, detail="Business context missing")
+
+    return ProductService.update_stock(
+        db=db,
+        business_id=business_id,
+        product_id=product_id,
+        mode=payload.mode,
+        quantity=payload.quantity,
+        reason=payload.reason,
+    )
+
 @router.get("")
 def get_products(
     db: Session = Depends(get_db),

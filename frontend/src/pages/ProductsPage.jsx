@@ -16,10 +16,47 @@ function ProductsPage() {
   const [error, setError] = useState('');
   const { isBusinessOwner } = useAuth();
   const [showAddProduct, setShowAddProduct] = useState(false);
+  const [stockMode, setStockMode] = useState('add'); // set | add | remove
+  const [stockQty, setStockQty] = useState('');
+  const [stockSaving, setStockSaving] = useState(false);
+  const [stockError, setStockError] = useState('');
+  const [stockSuccess, setStockSuccess] = useState('');
 
   useEffect(() => {
     loadProducts();
   }, []);
+
+  const handleStockUpdate = async () => {
+    if (!selected || !isBusinessOwner) return;
+    setStockError('');
+    setStockSuccess('');
+
+    const qty = parseInt(stockQty, 10);
+    if (Number.isNaN(qty) || qty < 0) {
+      setStockError('Enter a valid quantity');
+      return;
+    }
+
+    try {
+      setStockSaving(true);
+      const updated = await productService.updateStock(selected.id, {
+        mode: stockMode,
+        quantity: qty,
+        reason: 'manual_ui',
+      });
+      setStockSuccess('Stock updated');
+      setStockQty('');
+      // refresh list + selected
+      await loadProducts();
+      setSelected(updated);
+    } catch (err) {
+      setStockError(
+        err.response?.data?.detail || err.message || 'Failed to update stock'
+      );
+    } finally {
+      setStockSaving(false);
+    }
+  };
 
   const loadProducts = async () => {
     try {
@@ -114,6 +151,7 @@ function ProductsPage() {
             <Plus size={16} />
             Add Product
           </button>
+          
         )}
       </header>
 
@@ -200,6 +238,7 @@ function ProductsPage() {
                 })}
               </tbody>
             </table>
+            
           )}
         </div>
 
@@ -266,7 +305,60 @@ function ProductsPage() {
                     {stockStatus(selected).label}
                   </span>
                 </span>
+                
               </div>
+                            {isBusinessOwner && (
+                <>
+                  <div className="detail-section-label">Update stock</div>
+                  {stockError && (
+                    <div style={{ color: '#991b1b', fontSize: 12, marginBottom: 8 }}>
+                      {String(stockError)}
+                    </div>
+                  )}
+                  {stockSuccess && (
+                    <div style={{ color: '#166534', fontSize: 12, marginBottom: 8 }}>
+                      {stockSuccess}
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+                    <select
+                      className="search-input"
+                      style={{ width: 120 }}
+                      value={stockMode}
+                      onChange={(e) => setStockMode(e.target.value)}
+                    >
+                      <option value="add">Add</option>
+                      <option value="remove">Remove</option>
+                      <option value="set">Set exact</option>
+                    </select>
+                    <input
+                      className="search-input"
+                      style={{ width: 100 }}
+                      type="number"
+                      min="0"
+                      placeholder="Qty"
+                      value={stockQty}
+                      onChange={(e) => setStockQty(e.target.value)}
+                    />
+                    <button
+                      type="button"
+                      onClick={handleStockUpdate}
+                      disabled={stockSaving}
+                      style={{
+                        background: '#111827',
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: 8,
+                        padding: '8px 12px',
+                        fontSize: 13,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {stockSaving ? 'Saving…' : 'Update'}
+                    </button>
+                  </div>
+                </>
+              )}
 
               {selected.description && (
                 <>

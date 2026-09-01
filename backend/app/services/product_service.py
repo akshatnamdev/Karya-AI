@@ -5,8 +5,11 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.models.product import Product
-from app.models.inventory import Inventory
+from app.models.inventory import Inventory, StockMovement
+from datetime import datetime  # if not already
 from app.utils.formatters import safe_float, format_currency
+from datetime import datetime
+from fastapi import HTTPException
 
 
 class ProductService:
@@ -95,7 +98,111 @@ class ProductService:
         db.refresh(new_product)
         
         return ProductService._format_product_with_stock(new_product, db)    
-    
+
+    @staticmethod
+    def update_stock(
+        db: Session,
+        business_id: int,
+        product_id: int,
+        mode: str,
+        quantity: int,
+        reason: str = None,
+    ) -> dict:
+        """
+        Unified stock update for Business UI + AI Assistant.
+        mode: "set" | "add" | "remove"
+        """
+        mode = (mode or "").lower().strip()
+        if mode not in ("set", "add", "remove"):
+            raise HTTPException(
+                status_code=400,
+                detail="mode must be one of: set, add, remove",
+            )
+
+        try:
+            quantity = int(quantity)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="quantity must be an integer")
+
+        if quantity < 0:
+            raise HTTPException(status_code=400, detail="quantity cannot be negative")
+
+        product = (
+            db.query(Product)
+            .filter(
+                Product.id == product_id,
+                Product.business_id == business_id,
+            )
+            .first()
+        )
+        if not product:
+            raise HTTPException(status_code=404, detail="Product not found")
+
+        inventory = (
+            db.query(Inventory)
+            .filter(Inventory.product_id == product_id)
+            .first()
+        )
+        if not inventory:
+            # Create inventory row if missing (safe for older products)
+            inventory = Inventory(
+                product_id=product_id,
+                current_stock=0,
+                reorder_level=10,
+                reorder_quantity=50,
+            )
+            db.add(inventory)
+            db.flush()
+
+        stock_before = int(inventory.current_stock or 0)
+
+        if mode == "set":
+            stock_after = quantity
+            movement_type = "adjustment"
+            movement_qty = abs(stock_after - stock_before)
+        elif mode == "add":
+            stock_after = stock_before + quantity
+            movement_type = "in"
+            movement_qty = quantity
+        else:  # remove
+            if quantity > stock_before:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Cannot remove {quantity}. Current stock is {stock_before}",
+                )
+            stock_after = stock_before - quantity
+            movement_type = "out"
+            movement_qty = quantity
+
+        inventory.current_stock = stock_after
+        try:
+            inventory.last_stock_check = datetime.utcnow()
+        except Exception:
+            pass
+
+        db.add(
+            StockMovement(
+                product_id=product_id,
+                movement_type=movement_type,
+                quantity=movement_qty,
+                reason=reason or f"stock_{mode}",
+                reference_type="manual_or_ai",
+                reference_id=None,
+                stock_before=stock_before,
+                stock_after=stock_after,
+                notes=reason,
+            )
+        )
+
+        try:
+            db.commit()
+            db.refresh(product)
+        except Exception:
+            db.rollback()
+            raise HTTPException(status_code=500, detail="Failed to update stock")
+
+        return ProductService._format_product_with_stock(product, db)
+
     # ==================== PRIVATE HELPERS ====================
     
     @staticmethod

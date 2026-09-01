@@ -7,6 +7,8 @@ import json
 import re
 import time
 import os
+from typing import Optional, List, Any
+
 from sqlalchemy.orm import Session
 
 from app.services.ai_service import ai_service
@@ -22,24 +24,10 @@ from app.schemas.ai import AIQuery, AIResponse
 
 class AIAssistantService:
     """AI Business Assistant with caching, demo mode, actions, and fallback"""
-    @staticmethod
-    def _invalidate_cache(scope: dict):
-        """Purges cached AI responses so next clicks/questions fetch fresh DB data"""
-        try:
-            cache_scope_key = f"{scope.get('scope')}_{scope.get('business_id')}_{scope.get('customer_id')}"
-            if hasattr(AICache, "clear_scope"):
-                AICache.clear_scope(cache_scope_key)
-            elif hasattr(AICache, "delete"):
-                AICache.delete(cache_scope_key)
-            elif hasattr(AICache, "clear"):
-                AICache.clear()
-            elif hasattr(AICache, "_cache") and isinstance(getattr(AICache, "_cache"), dict):
-                getattr(AICache, "_cache").clear()
-        except Exception as e:
-            print(f"Cache invalidation warning: {e}")
+
     @staticmethod
     def ask_question(db: Session, query: AIQuery, scope: dict, use_demo: bool = False) -> AIResponse:
-        """Main method with protection, RBAC, and optional create actions"""
+        """Main method with protection, RBAC, and optional create/update actions"""
         start_time = time.time()
 
         # ==================== LAYER 1: DEMO MODE ====================
@@ -48,17 +36,28 @@ class AIAssistantService:
             if demo_response:
                 return AIResponse(**demo_response)
 
-        # ==================== LAYER 1.5: ACTIONS (order / product) ====================
-        # Mutations must run BEFORE cache and must NOT be cached.
-        action_response = AIAssistantService._try_handle_action(db, query, scope, start_time)
-        if action_response is not None:
-            return action_response
+        # ==================== LAYER 1.5: ACTIONS ====================
+        # Mutations run BEFORE cache and must NOT be cached.
+        try:
+            action_response = AIAssistantService._try_handle_action(db, query, scope, start_time)
+            if action_response is not None:
+                return action_response
+        except Exception as e:
+            print(f"[AI ACTION ERROR] {e}")
+            return AIAssistantService._action_answer(
+                query,
+                start_time,
+                f"I couldn't complete that action: {getattr(e, 'detail', None) or str(e)}",
+            )
 
         # ==================== LAYER 2: CACHE CHECK ====================
         cache_scope_key = f"{scope.get('scope')}_{scope.get('business_id')}_{scope.get('customer_id')}"
-        cached = AICache.get(query.question, query.language, cache_scope_key)
-        if cached:
-            return AIResponse(**cached)
+        try:
+            cached = AICache.get(query.question, query.language, cache_scope_key)
+            if cached:
+                return AIResponse(**cached)
+        except Exception as e:
+            print(f"[AI CACHE GET ERROR] {e}")
 
         # ==================== LAYER 3: FRESH API CALL ====================
         try:
@@ -71,7 +70,7 @@ class AIAssistantService:
             business_context=business_context,
             user_question=query.question,
             language=query.language,
-            role=scope["scope"],
+            role=scope.get("scope") or "business",
         )
 
         # ==================== LAYER 4: MODEL FALLBACK ====================
@@ -101,14 +100,17 @@ class AIAssistantService:
 
         response_data = {
             "question": query.question,
-            "answer": ai_result.get("response", "").strip(),
+            "answer": (ai_result.get("response") or "").strip(),
             "model_used": ai_result.get("model", "unknown"),
             "response_time_ms": response_time_ms,
             "sources": AIAssistantService._get_sources(),
             "detected_language": detected_language,
         }
 
-        AICache.set(query.question, query.language, cache_scope_key, response_data)
+        try:
+            AICache.set(query.question, query.language, cache_scope_key, response_data)
+        except Exception as e:
+            print(f"[AI CACHE SET ERROR] {e}")
 
         return AIResponse(**response_data)
 
@@ -124,17 +126,10 @@ class AIAssistantService:
         )
         return AIAssistantService.ask_question(db, query, scope)
 
-    # ==================== ACTION HANDLING (NEW) ====================
+    # ==================== ACTION HANDLING ====================
 
     @staticmethod
     def _try_handle_action(db: Session, query: AIQuery, scope: dict, start_time: float):
-        """
-        If user wants to place order or add product:
-        - extract details
-        - ask for missing info OR
-        - call existing ProductService / OrderService
-        Returns AIResponse or None (fall through to normal Q&A).
-        """
         intent = AIAssistantService._detect_action_intent(query.question, scope.get("scope"))
         if not intent:
             return None
@@ -145,11 +140,15 @@ class AIAssistantService:
         if intent == "place_order":
             return AIAssistantService._handle_place_order(db, query, scope, start_time)
 
+        if intent == "update_stock":
+            return AIAssistantService._handle_update_stock(db, query, scope, start_time)
+
         return None
 
     @staticmethod
     def _detect_action_intent(question: str, role: str):
         q = (question or "").lower().strip()
+        role = role or ""
 
         add_product_keys = [
             "add product",
@@ -162,7 +161,6 @@ class AIAssistantService:
             "naya product",
         ]
 
-        # Broad place-order intent (customer + business)
         place_order_keys = [
             "place order",
             "create order",
@@ -178,35 +176,59 @@ class AIAssistantService:
             "order chahiye",
             "order karna",
             "i want to place",
-            "place an order",
             "order of",
             "i need",
             "i want",
             "mujhe",
             "chahiye",
-            "book",
             "buy",
             "purchase",
             "get me",
         ]
 
+        stock_keys = [
+            "update stock",
+            "restock",
+            "add stock",
+            "set stock",
+            "stock add",
+            "stock update",
+            "increase stock",
+            "reduce stock",
+            "remove stock",
+            "inventory update",
+            "stock badhao",
+            "stock kam",
+            "stock set",
+        ]
+
+        history_keys = [
+            "show my order",
+            "show all my order",
+            "my orders",
+            "order history",
+            "list my order",
+            "pending order",
+            "where is my order",
+            "order status",
+            "show all products",
+            "show products",
+            "product catalog",
+            "recent orders",
+            "show me my recent",
+        ]
+
+        # Never treat pure history/catalog questions as mutations
+        if any(h in q for h in history_keys):
+            return None
+
         if role == "business" and any(k in q for k in add_product_keys):
             return "add_product"
 
+        if role == "business" and any(k in q for k in stock_keys):
+            return "update_stock"
+
         if role in ("business", "customer") and any(k in q for k in place_order_keys):
-            # Avoid treating pure history questions as place-order
-            history_keys = [
-                "show my order",
-                "show all my order",
-                "my orders",
-                "order history",
-                "list my order",
-                "pending order",
-                "where is my order",
-                "order status",
-            ]
-            if any(h in q for h in history_keys):
-                return None
             return "place_order"
 
         return None
@@ -215,9 +237,7 @@ class AIAssistantService:
     def _handle_add_product(db: Session, query: AIQuery, scope: dict, start_time: float) -> AIResponse:
         if scope.get("scope") != "business":
             return AIAssistantService._action_answer(
-                query,
-                start_time,
-                "Only business users can add products.",
+                query, start_time, "Only business users can add products."
             )
 
         business_id = scope.get("business_id")
@@ -227,7 +247,7 @@ class AIAssistantService:
             )
 
         extracted = AIAssistantService._extract_json_with_ai(
-            instruction=AIAssistantService._add_product_extract_prompt(query.question),
+            instruction=AIAssistantService._add_product_extract_prompt(query.question)
         )
 
         if not extracted:
@@ -282,6 +302,7 @@ class AIAssistantService:
                 business_id=business_id,
                 product_data=product_data,
             )
+            AIAssistantService._invalidate_cache(scope)
         except Exception as e:
             detail = getattr(e, "detail", None) or str(e)
             return AIAssistantService._action_answer(
@@ -296,7 +317,12 @@ class AIAssistantService:
             f"- **Stock:** {created.get('stock', 0)}\n"
             f"- **ID:** {created.get('id')}"
         )
-        return AIAssistantService._action_answer(query, start_time, answer, sources=["products table", "inventory table"])
+        return AIAssistantService._action_answer(
+            query,
+            start_time,
+            answer,
+            sources=["products table", "inventory table"],
+        )
 
     @staticmethod
     def _handle_place_order(db: Session, query: AIQuery, scope: dict, start_time: float) -> AIResponse:
@@ -312,22 +338,18 @@ class AIAssistantService:
                 query, start_time, "Business context missing. Please log in again."
             )
 
-        # Catalog snapshot for name → id resolution (and for extraction context)
         products = (
             db.query(Product)
             .filter(Product.business_id == business_id, Product.is_active == True)
             .all()
         )
         catalog_lines = [
-            f"id={p.id} | name={p.name} | price={p.selling_price}"
-            for p in products[:80]
+            f"id={p.id} | name={p.name} | price={p.selling_price}" for p in products[:80]
         ]
         catalog_text = "\n".join(catalog_lines) if catalog_lines else "No products available."
 
-        customers_text = ""
+        customers_text = "N/A"
         if role == "business":
-            customers = db.query(Customer).limit(50).all()
-            # Prefer business-linked customers if model has business_id
             try:
                 customers = (
                     db.query(Customer)
@@ -336,7 +358,7 @@ class AIAssistantService:
                     .all()
                 )
             except Exception:
-                pass
+                customers = db.query(Customer).limit(50).all()
             customers_text = "\n".join(
                 [f"id={c.id} | name={getattr(c, 'name', '')}" for c in customers]
             ) or "No customers found."
@@ -347,7 +369,7 @@ class AIAssistantService:
                 role=role,
                 catalog_text=catalog_text,
                 customers_text=customers_text,
-            ),
+            )
         )
 
         if not extracted:
@@ -415,9 +437,7 @@ class AIAssistantService:
             product_name = (item.get("product_name") or "").strip()
 
             if not product_id and product_name:
-                product_id = AIAssistantService._resolve_product_id(
-                    db, business_id, product_name
-                )
+                product_id = AIAssistantService._resolve_product_id(db, business_id, product_name)
 
             if not product_id:
                 unresolved.append(product_name or str(item))
@@ -436,17 +456,18 @@ class AIAssistantService:
                 query,
                 start_time,
                 "I could not match these products: "
-                + ", ".join(unresolved)
+                + ", ".join([str(x) for x in unresolved])
                 + ".\nPlease use exact catalog names or product ids.",
             )
 
         if not items_data:
             return AIAssistantService._action_answer(
-                query, start_time, "No valid order items found. Please try again with product and quantity."
+                query,
+                start_time,
+                "No valid order items found. Please try again with product and quantity.",
             )
 
         notes = extracted.get("notes") or None
-        source = "ai"
 
         try:
             result = OrderService.create_unified_order(
@@ -454,9 +475,10 @@ class AIAssistantService:
                 business_id=business_id,
                 customer_id=customer_id,
                 items_data=items_data,
-                source=source,
+                source="ai",
                 notes=notes,
             )
+            AIAssistantService._invalidate_cache(scope)
         except Exception as e:
             detail = getattr(e, "detail", None) or str(e)
             return AIAssistantService._action_answer(
@@ -485,6 +507,116 @@ class AIAssistantService:
             answer,
             sources=["orders table", "products table", "inventory table"],
         )
+
+    @staticmethod
+    def _handle_update_stock(db: Session, query: AIQuery, scope: dict, start_time: float) -> AIResponse:
+        if scope.get("scope") != "business":
+            return AIAssistantService._action_answer(
+                query, start_time, "Only business users can update stock."
+            )
+
+        business_id = scope.get("business_id")
+        if not business_id:
+            return AIAssistantService._action_answer(
+                query, start_time, "Business context missing. Please log in again."
+            )
+
+        # If update_stock is not implemented yet, fail softly
+        if not hasattr(ProductService, "update_stock"):
+            return AIAssistantService._action_answer(
+                query,
+                start_time,
+                "Stock update service is not available yet. Please use Inventory page or add ProductService.update_stock.",
+            )
+
+        products = db.query(Product).filter(Product.business_id == business_id).all()
+        catalog_text = "\n".join([f"id={p.id} | name={p.name}" for p in products[:80]]) or "No products."
+
+        extracted = AIAssistantService._extract_json_with_ai(
+            instruction=(
+                "Extract stock update details from the user message.\n"
+                "Return ONLY valid JSON:\n"
+                "{\n"
+                '  "product_id": number or null,\n'
+                '  "product_name": string or null,\n'
+                '  "mode": "set" or "add" or "remove",\n'
+                '  "quantity": number or null,\n'
+                '  "reason": string or null\n'
+                "}\n"
+                'Rules:\n'
+                '- "restock", "add stock", "increase" => mode "add"\n'
+                '- "set stock to X" => mode "set"\n'
+                '- "remove", "reduce", "deduct" => mode "remove"\n'
+                f"CATALOG:\n{catalog_text}\n"
+                f"USER MESSAGE:\n{query.question}\n"
+            )
+        )
+
+        if not extracted:
+            return AIAssistantService._action_answer(
+                query,
+                start_time,
+                "I can update stock. Try:\n"
+                "- Restock Paracetamol by 50\n"
+                "- Set stock of Notebook to 100\n"
+                "- Remove 10 from Pencil stock",
+            )
+
+        mode = (extracted.get("mode") or "add").lower()
+        qty = extracted.get("quantity")
+        product_id = extracted.get("product_id")
+        product_name = (extracted.get("product_name") or "").strip()
+
+        if not product_id and product_name:
+            product_id = AIAssistantService._resolve_product_id(db, business_id, product_name)
+
+        missing = []
+        if not product_id:
+            missing.append("product")
+        if qty is None or qty == "":
+            missing.append("quantity")
+        if mode not in ("set", "add", "remove"):
+            missing.append("mode (set/add/remove)")
+
+        if missing:
+            return AIAssistantService._action_answer(
+                query,
+                start_time,
+                f"Need more details: **{', '.join(missing)}**.\n"
+                "Example: Restock Paracetamol by 50",
+            )
+
+        try:
+            updated = ProductService.update_stock(
+                db=db,
+                business_id=business_id,
+                product_id=int(product_id),
+                mode=mode,
+                quantity=int(qty),
+                reason=extracted.get("reason") or "ai_stock_update",
+            )
+            AIAssistantService._invalidate_cache(scope)
+        except Exception as e:
+            detail = getattr(e, "detail", None) or str(e)
+            return AIAssistantService._action_answer(
+                query, start_time, f"Could not update stock: {detail}"
+            )
+
+        answer = (
+            f"✅ Stock updated.\n"
+            f"- **Product:** {updated.get('name')}\n"
+            f"- **Mode:** {mode}\n"
+            f"- **Qty applied:** {qty}\n"
+            f"- **Current stock:** {updated.get('stock')}"
+        )
+        return AIAssistantService._action_answer(
+            query,
+            start_time,
+            answer,
+            sources=["products table", "inventory table"],
+        )
+
+    # ==================== EXTRACTION HELPERS ====================
 
     @staticmethod
     def _add_product_extract_prompt(question: str) -> str:
@@ -539,7 +671,7 @@ USER MESSAGE:
 """
 
     @staticmethod
-    def _extract_json_with_ai(instruction: str) -> dict | None:
+    def _extract_json_with_ai(instruction: str) -> Optional[dict]:
         result = ai_service.generate(prompt=instruction, model_type="fast", max_retries=2)
         if result.get("status") == "error":
             result = ai_service.generate(prompt=instruction, model_type="smart", max_retries=1)
@@ -550,23 +682,23 @@ USER MESSAGE:
         return AIAssistantService._parse_json_loose(text)
 
     @staticmethod
-    def _parse_json_loose(text: str) -> dict | None:
+    def _parse_json_loose(text: str) -> Optional[dict]:
         if not text:
             return None
-        # Strip markdown fences if model adds them
         fence = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
         if fence:
             text = fence.group(1).strip()
-        # First object in text
         try:
-            return json.loads(text)
+            data = json.loads(text)
+            return data if isinstance(data, dict) else None
         except Exception:
             pass
         match = re.search(r"\{[\s\S]*\}", text)
         if not match:
             return None
         try:
-            return json.loads(match.group(0))
+            data = json.loads(match.group(0))
+            return data if isinstance(data, dict) else None
         except Exception:
             return None
 
@@ -575,7 +707,6 @@ USER MESSAGE:
         if not name:
             return None
         name = name.strip()
-        # exact
         p = (
             db.query(Product)
             .filter(
@@ -587,7 +718,6 @@ USER MESSAGE:
         )
         if p:
             return p.id
-        # partial
         p = (
             db.query(Product)
             .filter(
@@ -604,30 +734,50 @@ USER MESSAGE:
         if not name:
             return None
         name = name.strip()
-        q = db.query(Customer).filter(Customer.name.ilike(name))
         try:
-            q = db.query(Customer).filter(
-                Customer.business_id == business_id,
-                Customer.name.ilike(name),
+            c = (
+                db.query(Customer)
+                .filter(Customer.business_id == business_id, Customer.name.ilike(name))
+                .first()
             )
-        except Exception:
-            q = db.query(Customer).filter(Customer.name.ilike(name))
-        c = q.first()
-        if c:
-            return c.id
-        q = db.query(Customer).filter(Customer.name.ilike(f"%{name}%"))
-        try:
-            q = db.query(Customer).filter(
-                Customer.business_id == business_id,
-                Customer.name.ilike(f"%{name}%"),
+            if c:
+                return c.id
+            c = (
+                db.query(Customer)
+                .filter(Customer.business_id == business_id, Customer.name.ilike(f"%{name}%"))
+                .first()
             )
+            return c.id if c else None
         except Exception:
-            pass
-        c = q.first()
-        return c.id if c else None
+            c = db.query(Customer).filter(Customer.name.ilike(name)).first()
+            if c:
+                return c.id
+            c = db.query(Customer).filter(Customer.name.ilike(f"%{name}%")).first()
+            return c.id if c else None
 
     @staticmethod
-    def _action_answer(query: AIQuery, start_time: float, answer: str, sources: list | None = None) -> AIResponse:
+    def _invalidate_cache(scope: dict):
+        """Best-effort cache clear so next questions fetch fresh DB data."""
+        try:
+            cache_scope_key = f"{scope.get('scope')}_{scope.get('business_id')}_{scope.get('customer_id')}"
+            if hasattr(AICache, "clear_scope"):
+                AICache.clear_scope(cache_scope_key)
+            elif hasattr(AICache, "delete"):
+                AICache.delete(cache_scope_key)
+            elif hasattr(AICache, "clear"):
+                AICache.clear()
+            elif hasattr(AICache, "_cache") and isinstance(getattr(AICache, "_cache"), dict):
+                getattr(AICache, "_cache").clear()
+        except Exception as e:
+            print(f"Cache invalidation warning: {e}")
+
+    @staticmethod
+    def _action_answer(
+        query: AIQuery,
+        start_time: float,
+        answer: str,
+        sources: Optional[List[str]] = None,
+    ) -> AIResponse:
         response_time_ms = int((time.time() - start_time) * 1000)
         return AIResponse(
             question=query.question,
@@ -638,7 +788,7 @@ USER MESSAGE:
             detected_language=AIAssistantService._detect_language(query.question),
         )
 
-    # ==================== PRIVATE HELPERS (EXISTING) ====================
+    # ==================== PRIVATE HELPERS ====================
 
     @staticmethod
     def _build_prompt(business_context: str, user_question: str, language: str, role: str) -> str:
@@ -649,12 +799,13 @@ USER MESSAGE:
 Your job is to help them check their order status, pending invoices, or browse available products in the catalog.
 If the customer says hello, asks for help, or asks general questions, be welcoming and let them know you can help them check their orders, pending bills, or product catalog.
 They can also place orders by saying things like "place order for 2 Notebook".
-When the customer wants to buy/order items (e.g. "i want 2 vitamin C"), the system will handle real order placement separately. Do not pretend an order was placed in normal Q&A.
+When order placement is handled by the system action layer, do not invent fake order confirmations in normal Q&A.
 If they ask about other customers or business internal data, politely inform them you can only share details related to their own account."""
         elif role == "business":
             persona = """You are Karya, an intelligent business assistant for the BUSINESS OWNER.
 You have access to the full business performance data, financials, inventory, and customer account details. Help the owner manage their business effectively.
-They can add products ("add product Notebook price 50 stock 100") and place orders ("place order for customer Ramesh: 2 Notebook")."""
+They can add products ("add product Notebook price 50 stock 100"), place orders ("place order for customer Ramesh: 2 Notebook"), and update stock ("restock Paracetamol by 50").
+Never pretend an order/product/stock change succeeded unless the system action layer already did it."""
         else:
             persona = "You are Karya, a Platform Admin assistant with system-wide visibility."
 
@@ -666,7 +817,7 @@ BUSINESS & ACCOUNT DATA:
 USER QUESTION: {user_question}
 
 INSTRUCTIONS:
-1. Answer ONLY from the data above. Never invent numbers .
+1. Answer ONLY from the data above. Never invent numbers.
 2. Answer ONLY based on the data above.
 3. Be minimal and direct. Prefer short lines over long paragraphs.
 4. {language_instruction}
@@ -675,23 +826,16 @@ INSTRUCTIONS:
    - 🔴 = Any OVERDUE invoice/payment, or CRITICAL low stock (stock < 50% of reorder level).
    - 🟡 = Any pending payment that is NOT overdue yet, or WARNING low stock (stock <= reorder level).
    - 🟢 = Fully paid, zero dues, or healthy stock (> reorder level).
-   - Rules per section:
-     * Overdue customer -> MUST use 🔴
-     * Pending customer (no overdue) -> MUST use 🟡
-     * No dues customer -> MUST use 🟢
-     * Critical stock -> MUST use 🔴
-     * Low stock -> MUST use 🟡
-     * Healthy stock -> MUST use 🟢
 7. Structure:
    - Lead with the answer in 1–2 lines
    - Then short bullet or numbered facts if needed
-   - Optional one-line action at the end (no emoji unless status)
 8. Labels can be bold Markdown (**Label:**) but keep the message compact.
 9. No greetings like "Namaste!" unless the user greeted first.
 10. No filler phrases ("Based on our data", "Here is the record").
-11. NEVER say an order was placed, created, or confirmed unless the system already executed a real order action in this turn.
-12. NEVER invent order IDs, totals, or item lines.
-13. If the user wants to order something but details are incomplete, ask for product name and quantity only.
+11. FORMATTING FOR LISTS (CRITICAL):
+    - ALWAYS format lists of orders or products as separate markdown bullet points (one item per line starting with "- ").
+    - NEVER merge or collapse multiple orders/products into a single paragraph or inline text.
+12. NEVER say an order/product/stock change was completed unless it already happened via system action.
 
 ANSWER:"""
         return prompt
@@ -711,8 +855,8 @@ ANSWER:"""
         hindi_chars = ["ा", "ि", "ी", "क", "ख", "ग", "च", "ज", "त", "न", "र", "स", "ह"]
         hinglish_words = ["kitne", "kitna", "hai", "hain", "kya", "ka", "ki", "ke", "aur", "aaj"]
 
-        text_lower = text.lower()
-        if any(char in text for char in hindi_chars):
+        text_lower = (text or "").lower()
+        if any(char in (text or "") for char in hindi_chars):
             return "hindi"
         if any(word in text_lower for word in hinglish_words):
             return "hinglish"
@@ -720,13 +864,19 @@ ANSWER:"""
 
     @staticmethod
     def _get_sources() -> list:
-        return ["customers table", "products table", "inventory table", "orders table", "invoices table"]
+        return [
+            "customers table",
+            "products table",
+            "inventory table",
+            "orders table",
+            "invoices table",
+        ]
 
     @staticmethod
     def _get_friendly_error_message(error: str) -> str:
-        error_lower = error.lower()
-        if "503" in error or "unavailable" in error_lower:
+        error_lower = (error or "").lower()
+        if "503" in (error or "") or "unavailable" in error_lower:
             return "Karya AI is experiencing high demand. Please try again in a few moments."
-        if "429" in error or "quota" in error_lower:
+        if "429" in (error or "") or "quota" in error_lower:
             return "API quota reached. Please wait a minute and try again."
         return "AI temporarily unavailable. Please try again."
