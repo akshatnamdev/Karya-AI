@@ -9,7 +9,7 @@ from app.models.product import Product
 from app.models.inventory import Inventory, StockMovement
 from app.models.order import Order, OrderItem
 from app.models.invoice import Invoice
-from app.models.payment import Payment
+from app.models.payment import Payment, PaymentLink  # noqa: F401
 from app.models.conversation import Conversation
 from app.models.ai_action import AIAction
 from app.models.embedding import Embedding

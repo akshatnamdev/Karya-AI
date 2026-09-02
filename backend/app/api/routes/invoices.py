@@ -10,6 +10,7 @@ from app.db.database import get_db
 from app.core.dependencies import get_current_user, get_business_scope
 from app.models.user import User
 from app.services.invoice_service import InvoiceService
+from app.services.payment_service import PaymentService
 
 
 router = APIRouter(prefix="/api/invoices", tags=["Invoices"])
@@ -68,3 +69,19 @@ def get_invoice(
     scope: dict = Depends(get_business_scope),
 ):
     return InvoiceService.get_invoice_detail(db, invoice_id, scope)
+
+@router.post("/{invoice_id}/payment-link")
+def create_invoice_payment_link(
+    invoice_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    scope: dict = Depends(get_business_scope),
+):
+    from app.services.payment_service import PaymentService
+    return PaymentService.create_payment_link(
+        db=db,
+        invoice_id=invoice_id,
+        scope=scope,
+        created_by_user_id=getattr(current_user, "id", None),
+    )
+    

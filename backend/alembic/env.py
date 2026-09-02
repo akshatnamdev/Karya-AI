@@ -7,6 +7,11 @@ from alembic import context
 import os
 import sys
 from dotenv import load_dotenv
+from app.db.database import Base
+# import all models so they register on Base.metadata
+from app.models.payment import Payment, PaymentLink  # noqa: F401
+# ... other models ...
+target_metadata = Base.metadata
 
 # Load environment variables
 load_dotenv()

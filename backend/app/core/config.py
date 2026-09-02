@@ -24,7 +24,16 @@ class Settings(BaseSettings):
     SECRET_KEY: str
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440  # 24 hours
-    
+
+    # Payments
+    PAYMENT_PROVIDER: str = "razorpay"  # razorpay | none
+    PAYMENT_PUBLIC_BASE_URL: str = "http://localhost:5173"  # prod: https://pay.karyaai.com
+    PAYMENT_LINK_EXPIRY_HOURS: int = 72
+
+    RAZORPAY_KEY_ID: str = ""
+    RAZORPAY_KEY_SECRET: str = ""
+    RAZORPAY_WEBHOOK_SECRET: str = ""
+        
     class Config:
         env_file = ".env"
         case_sensitive = True

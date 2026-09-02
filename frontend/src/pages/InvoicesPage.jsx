@@ -1,7 +1,8 @@
 import { useState, useEffect, useMemo } from 'react';
 import Layout from '../components/Layout';
 import invoiceService from '../services/invoiceService';
-import { useAuth } from '../context/AuthContext'; // change path if your AuthContext lives elsewhere
+import paymentService from '../services/paymentService';
+import { useAuth } from '../context/AuthContext';
 import { Loader2 } from 'lucide-react';
 import '../styles/DataPage.css';
 
@@ -16,9 +17,19 @@ const btnPrimary = {
   cursor: 'pointer',
 };
 
-function InvoicesPage() {
-  const { isBusinessOwner } = useAuth();
+const btnSecondary = {
+  background: '#fff',
+  color: '#374151',
+  border: '1px solid #e5e7eb',
+  borderRadius: 8,
+  padding: '8px 12px',
+  fontSize: 13,
+  cursor: 'pointer',
+};
 
+function InvoicesPage() {
+  const auth = useAuth() || {};
+  const { isBusinessOwner, isCustomer } = useAuth();
   const [invoices, setInvoices] = useState([]);
   const [overdue, setOverdue] = useState(null);
   const [selected, setSelected] = useState(null);
@@ -29,13 +40,19 @@ function InvoicesPage() {
   const [filter, setFilter] = useState('all');
   const [error, setError] = useState('');
 
-  // Payment UI state (business only)
+  // Manual payment
   const [payAmount, setPayAmount] = useState('');
   const [payMethod, setPayMethod] = useState('manual');
   const [payNote, setPayNote] = useState('');
   const [payLoading, setPayLoading] = useState(false);
   const [payError, setPayError] = useState('');
   const [paySuccess, setPaySuccess] = useState('');
+
+  // Payment link (scoped per selected invoice)
+  const [linkLoading, setLinkLoading] = useState(false);
+  const [linkError, setLinkError] = useState('');
+  const [linkInfo, setLinkInfo] = useState(null);
+  const [linkCopied, setLinkCopied] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -59,18 +76,47 @@ function InvoicesPage() {
     }
   };
 
-  const openDetail = async (invoice) => {
-    setSelected(invoice);
-    setDetailLoading(true);
-    setDetail(null);
+  const resetSidePanelForms = () => {
     setPayError('');
     setPaySuccess('');
     setPayAmount('');
     setPayNote('');
     setPayMethod('manual');
+
+    setLinkError('');
+    setLinkInfo(null);
+    setLinkLoading(false);
+    setLinkCopied(false);
+  };
+
+  const openDetail = async (invoice) => {
+    if (!invoice) return;
+    setSelected(invoice);
+    setDetailLoading(true);
+    setDetail(null);
+    resetSidePanelForms();
+
     try {
       const data = await invoiceService.getById(invoice.id);
       setDetail(data);
+
+      // Prefer fresh values from detail API when present
+      const inv = data?.invoice;
+      if (inv) {
+        setSelected((prev) => ({
+          ...(prev || {}),
+          id: inv.id ?? invoice.id,
+          invoice_number: inv.invoice_number ?? invoice.invoice_number,
+          status: inv.status ?? invoice.status,
+          total: inv.total ?? invoice.total,
+          paid: inv.paid ?? invoice.paid,
+          balance: inv.balance ?? invoice.balance,
+          invoice_date: inv.invoice_date ?? invoice.invoice_date,
+          due_date: inv.due_date ?? invoice.due_date,
+          customer: data?.customer?.name ?? invoice.customer,
+          customer_phone: data?.customer?.phone ?? invoice.customer_phone,
+        }));
+      }
     } catch (err) {
       console.error(err);
     } finally {
@@ -126,6 +172,7 @@ function InvoicesPage() {
       setPayNote('');
       setDetail(data);
       syncSelectedFromDetail(data);
+      setLinkInfo(null); // old link amount may be stale
       await loadData();
     } catch (err) {
       const detailMsg = err.response?.data?.detail;
@@ -138,6 +185,75 @@ function InvoicesPage() {
       );
     } finally {
       setPayLoading(false);
+    }
+  };
+
+  const handleCustomerPayNow = async () => {
+    if (!selected?.id || !isCustomer) return;
+    setLinkError('');
+    setLinkLoading(true);
+    try {
+      const data = await paymentService.createLink(selected.id);
+      const info = { ...data, invoice_id: data.invoice_id ?? selected.id };
+      setLinkInfo(info);
+      if (info.url) {
+        window.open(info.url, '_blank', 'noopener,noreferrer');
+      }
+    } catch (err) {
+      const detailMsg = err.response?.data?.detail;
+      setLinkError(
+        typeof detailMsg === 'string'
+          ? detailMsg
+          : err.message || 'Could not start payment'
+      );
+    } finally {
+      setLinkLoading(false);
+    }
+  };
+
+  const handleCreatePaymentLink = async () => {
+    if (!selected?.id || !isBusinessOwner) return;
+
+    setLinkError('');
+    setLinkCopied(false);
+    setLinkLoading(true);
+
+    try {
+      const data = await paymentService.createLink(selected.id);
+      setLinkInfo({
+        ...data,
+        invoice_id: data.invoice_id ?? selected.id,
+      });
+    } catch (err) {
+      const detailMsg = err.response?.data?.detail;
+      setLinkError(
+        typeof detailMsg === 'string'
+          ? detailMsg
+          : Array.isArray(detailMsg)
+            ? detailMsg.map((d) => d.msg || JSON.stringify(d)).join(', ')
+            : err.message || 'Could not create payment link'
+      );
+      setLinkInfo(null);
+    } finally {
+      setLinkLoading(false);
+    }
+  };
+
+  // Only show link if it belongs to the currently selected invoice
+  const activeLink =
+    linkInfo && selected && Number(linkInfo.invoice_id) === Number(selected.id)
+      ? linkInfo
+      : null;
+
+  const copyLink = async () => {
+    const url = activeLink?.url;
+    if (!url) return;
+    try {
+      await navigator.clipboard.writeText(url);
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 2000);
+    } catch (_) {
+      setLinkError('Could not copy — select the URL manually');
     }
   };
 
@@ -170,12 +286,20 @@ function InvoicesPage() {
     return 'gray';
   };
 
+  const balanceNum = Number(selected?.balance ?? 0);
   const canRecordPayment =
     isBusinessOwner &&
     selected &&
     selected.status !== 'paid' &&
     selected.status !== 'cancelled' &&
-    Number(selected.balance ?? 0) > 0;
+    balanceNum > 0;
+
+  const canCreateLink =
+    isBusinessOwner &&
+    selected &&
+    selected.status !== 'paid' &&
+    selected.status !== 'cancelled' &&
+    balanceNum > 0;
 
   if (loading) {
     return (
@@ -234,10 +358,36 @@ function InvoicesPage() {
           onChange={(e) => setSearch(e.target.value)}
         />
         <div className="filter-tabs">
-          <button className={`filter-tab ${filter === 'all' ? 'active' : ''}`} onClick={() => setFilter('all')}>All</button>
-          <button className={`filter-tab ${filter === 'overdue' ? 'active' : ''}`} onClick={() => setFilter('overdue')}>Overdue</button>
-          <button className={`filter-tab ${filter === 'partially_paid' ? 'active' : ''}`} onClick={() => setFilter('partially_paid')}>Partial</button>
-          <button className={`filter-tab ${filter === 'paid' ? 'active' : ''}`} onClick={() => setFilter('paid')}>Paid</button>
+          <button
+            className={`filter-tab ${filter === 'all' ? 'active' : ''}`}
+            onClick={() => setFilter('all')}
+          >
+            All
+          </button>
+          <button
+            className={`filter-tab ${filter === 'overdue' ? 'active' : ''}`}
+            onClick={() => setFilter('overdue')}
+          >
+            Overdue
+          </button>
+          <button
+            className={`filter-tab ${filter === 'partially_paid' ? 'active' : ''}`}
+            onClick={() => setFilter('partially_paid')}
+          >
+            Partial
+          </button>
+          <button
+            className={`filter-tab ${filter === 'sent' ? 'active' : ''}`}
+            onClick={() => setFilter('sent')}
+          >
+            Sent
+          </button>
+          <button
+            className={`filter-tab ${filter === 'paid' ? 'active' : ''}`}
+            onClick={() => setFilter('paid')}
+          >
+            Paid
+          </button>
         </div>
       </div>
 
@@ -270,7 +420,7 @@ function InvoicesPage() {
                     <td>
                       <span className="status-pill">
                         <span className={`status-dot ${statusDot(inv.status)}`} />
-                        {inv.status?.replace('_', ' ')}
+                        {(inv.status || '').replace(/_/g, ' ')}
                       </span>
                     </td>
                   </tr>
@@ -289,12 +439,14 @@ function InvoicesPage() {
             </div>
           ) : (
             <>
-              <div className="detail-panel-title">{selected.invoice_number}</div>
+              <div className="detail-panel-title">
+                {selected.invoice_number || 'Invoice'}
+              </div>
 
               <div className="detail-row">
                 <span className="detail-label">Customer</span>
                 <span className="detail-value">
-                  {detail?.customer?.name || selected.customer}
+                  {detail?.customer?.name || selected.customer || '—'}
                 </span>
               </div>
               <div className="detail-row">
@@ -308,7 +460,7 @@ function InvoicesPage() {
                 <span className="detail-value">
                   <span className="status-pill">
                     <span className={`status-dot ${statusDot(selected.status)}`} />
-                    {selected.status?.replace('_', ' ')}
+                    {(selected.status || '').replace(/_/g, ' ')}
                   </span>
                 </span>
               </div>
@@ -338,13 +490,15 @@ function InvoicesPage() {
               <div className="detail-row">
                 <span className="detail-label">Invoice date</span>
                 <span className="detail-value">
-                  {selected.invoice_date?.slice(0, 10) || '—'}
+                  {selected.invoice_date
+                    ? String(selected.invoice_date).slice(0, 10)
+                    : '—'}
                 </span>
               </div>
               <div className="detail-row">
                 <span className="detail-label">Due date</span>
                 <span className="detail-value">
-                  {selected.due_date?.slice(0, 10) || '—'}
+                  {selected.due_date ? String(selected.due_date).slice(0, 10) : '—'}
                 </span>
               </div>
 
@@ -358,8 +512,44 @@ function InvoicesPage() {
                   </div>
                 </>
               )}
+                            {/* ===== CUSTOMER: PAY NOW ===== */}
+              {isCustomer &&
+                selected &&
+                selected.status !== 'paid' &&
+                selected.status !== 'cancelled' &&
+                Number(selected.balance) > 0 && (
+                  <>
+                    <div className="detail-section-label">Pay online</div>
+                    {linkError && (
+                      <div style={{ color: '#991b1b', fontSize: 12, marginBottom: 8 }}>
+                        {String(linkError)}
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      style={btnPrimary}
+                      disabled={linkLoading}
+                      onClick={handleCustomerPayNow}
+                    >
+                      {linkLoading
+                        ? 'Opening…'
+                        : `Pay ${formatMoney(selected.balance)}`}
+                    </button>
+                    <div style={{ fontSize: 11, color: '#6b7280', marginTop: 8 }}>
+                      You will complete payment securely via Razorpay. The invoice
+                      updates only after payment is verified.
+                    </div>
+                    {activeLink?.url && (
+                      <div style={{ marginTop: 10, fontSize: 12 }}>
+                        <a href={activeLink.url} target="_blank" rel="noreferrer">
+                          Open payment page again
+                        </a>
+                      </div>
+                    )}
+                  </>
+                )}
 
-              {/* ===== BUSINESS: RECORD PAYMENT ===== */}
+              {/* ===== RECORD PAYMENT ===== */}
               {canRecordPayment && (
                 <>
                   <div className="detail-section-label">Record payment</div>
@@ -412,7 +602,7 @@ function InvoicesPage() {
                       {payLoading ? 'Saving…' : 'Record payment'}
                     </button>
                     <div style={{ fontSize: 11, color: '#6b7280' }}>
-                      Partial payments supported. Razorpay can use the same API later.
+                      Partial payments supported. Gateway links use verified capture.
                     </div>
                   </div>
                 </>
@@ -422,6 +612,68 @@ function InvoicesPage() {
                 <div style={{ marginTop: 12, fontSize: 12, color: '#166534' }}>
                   Fully paid
                 </div>
+              )}
+
+              {/* ===== PAYMENT LINK ===== */}
+              {canCreateLink && (
+                <>
+                  <div className="detail-section-label">Payment link</div>
+
+                  {linkError && (
+                    <div style={{ color: '#991b1b', fontSize: 12, marginBottom: 8 }}>
+                      {String(linkError)}
+                    </div>
+                  )}
+
+                  {activeLink?.url ? (
+                    <div style={{ fontSize: 12, wordBreak: 'break-all' }}>
+                      <div style={{ marginBottom: 8 }}>{activeLink.url}</div>
+                      <div
+                        style={{
+                          display: 'flex',
+                          gap: 8,
+                          flexWrap: 'wrap',
+                          alignItems: 'center',
+                        }}
+                      >
+                        <button type="button" onClick={copyLink} style={btnPrimary}>
+                          {linkCopied ? 'Copied' : 'Copy link'}
+                        </button>
+                        <a
+                          href={activeLink.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={{ fontSize: 13 }}
+                        >
+                          Open
+                        </a>
+                        <button
+                          type="button"
+                          disabled={linkLoading}
+                          onClick={handleCreatePaymentLink}
+                          style={btnSecondary}
+                        >
+                          {linkLoading ? 'Creating…' : 'New link'}
+                        </button>
+                      </div>
+                      <div style={{ marginTop: 6, color: '#6b7280', fontSize: 11 }}>
+                        Amount locked: {formatMoney(activeLink.amount)}
+                        {activeLink.invoice_number
+                          ? ` · ${activeLink.invoice_number}`
+                          : ''}
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={linkLoading}
+                      onClick={handleCreatePaymentLink}
+                      style={btnPrimary}
+                    >
+                      {linkLoading ? 'Creating…' : 'Create payment link'}
+                    </button>
+                  )}
+                </>
               )}
             </>
           )}

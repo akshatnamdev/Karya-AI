@@ -12,6 +12,7 @@ import InvoicesPage from './pages/InvoicesPage';
 import AdminHome from './pages/AdminHome';
 import PortalHome from './pages/PortalHome';
 import SupportPage from './pages/SupportPage';
+import PublicPayPage from './pages/PublicPayPage';
 
 
 function RoleRoute({ children, allow }) {
@@ -63,6 +64,8 @@ function AppRoutes() {
       <Route path="/products" element={<RoleRoute allow={['business_owner', 'customer']}><ProductsPage /></RoleRoute>} />
       <Route path="/orders" element={<RoleRoute allow={['business_owner', 'customer']}><OrdersPage /></RoleRoute>} />
       <Route path="/invoices" element={<RoleRoute allow={['business_owner', 'customer']}><InvoicesPage /></RoleRoute>} />
+      {/* Public payment page — no auth */}
+      <Route path="/pay/:token" element={<PublicPayPage />} />
 
       {/* Support — available to all authenticated roles */}
       <Route

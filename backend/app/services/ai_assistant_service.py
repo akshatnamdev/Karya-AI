@@ -11,7 +11,6 @@ from typing import Optional, List, Any
 
 from sqlalchemy.orm import Session
 
-
 from app.services.ai_service import ai_service
 from app.services.ai_cache_service import AICache
 from app.services.demo_mode_service import DemoModeService

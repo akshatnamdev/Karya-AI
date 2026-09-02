@@ -16,8 +16,7 @@ from app.api.routes import auth as auth_routes
 from app.api.routes import public as public_routes
 from app.api.routes import admin as admin_routes
 from app.api.routes import support as support_routes
-
-
+from app.api.routes import payments as payments
 
 load_dotenv()
 
@@ -48,6 +47,7 @@ app.include_router(ai_routes.router)
 app.include_router(public_routes.router)
 app.include_router(admin_routes.router)
 app.include_router(support_routes.router)
+app.include_router(payments.router)
 
 
 
