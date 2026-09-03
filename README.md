@@ -60,7 +60,7 @@ Extracts structured orders from informal chat messages.
 ```
 Input: "Raj bhai 50 XYZ bhej dena Friday ko"
 
-Karya extracts:
+Karya extracts:=
 ✓ Customer: Raj Traders
 ✓ Product: XYZ  
 ✓ Quantity: 50
@@ -124,7 +124,7 @@ Understands Hinglish business language naturally.
 | **Sentence Transformers** | Text embeddings |
 | **Custom RAG Pipeline** | Grounded responses |
 
-### Frontend *(Coming Soon)*
+### Frontend (Done)
 | Technology | Purpose |
 |------------|---------|
 | **React 18** | UI framework |
