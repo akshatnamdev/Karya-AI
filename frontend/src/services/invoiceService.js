@@ -16,7 +16,11 @@ export const invoiceService = {
     return response.data;
   },
 
-  // NEW — Razorpay-ready
+  async remove(id) {
+    const res = await api.delete(`/api/invoices/${id}`);
+    return res.data;
+  },  
+
   async recordPayment(invoiceId, payload) {
     // payload: { amount, payment_method?: 'manual'|'cash'|'upi'|'razorpay', note?, reference? }
     const response = await api.post(`/api/invoices/${invoiceId}/payments`, payload);

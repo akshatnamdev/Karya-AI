@@ -230,6 +230,82 @@ class InvoiceService:
 
         return InvoiceService._format_invoice_detail(invoice, db)
 
+    @staticmethod
+    def delete_invoice(db: Session, invoice_id: int, scope: dict) -> dict:
+        if scope.get("scope") != "business":
+            raise HTTPException(status_code=403, detail="Only business can delete invoices")
+
+        business_id = scope.get("business_id")
+        if not business_id:
+            raise HTTPException(status_code=400, detail="Business context missing")
+
+        inv = (
+            db.query(Invoice)
+            .join(Order, Invoice.order_id == Order.id)
+            .filter(Invoice.id == invoice_id, Order.business_id == business_id)
+            .first()
+        )
+        if not inv:
+            raise HTTPException(status_code=404, detail="Invoice not found")
+
+        st = (inv.status or "").lower()
+        paid = safe_float(inv.paid_amount)
+        if st == "paid" or paid > 0:
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot delete an invoice with payments. Refund/adjust first.",
+            )
+
+        # Optional: block if payment_links paid
+        try:
+            from app.models.payment import PaymentLink, Payment
+            paid_link = (
+                db.query(PaymentLink)
+                .filter(PaymentLink.invoice_id == inv.id, PaymentLink.status == "paid")
+                .first()
+            )
+            if paid_link:
+                raise HTTPException(status_code=400, detail="Invoice has a completed payment link")
+        except ImportError:
+            pass
+
+        order = db.query(Order).filter(Order.id == inv.order_id).first()
+        # Reverse outstanding if invoice was sent and raised dues
+        if order and st not in ("cancelled", "draft"):
+            bal = safe_float(inv.balance_amount)
+            if bal > 0:
+                customer = db.query(Customer).filter(Customer.id == order.customer_id).first()
+                if customer:
+                    out = safe_float(customer.outstanding_amount) - bal
+                    customer.outstanding_amount = out if out > 0 else 0
+
+        inv_no = inv.invoice_number
+        iid = inv.id
+
+        # Delete dependent payment rows / links if any (unpaid drafts)
+        try:
+            from app.models.payment import Payment, PaymentLink
+            db.query(Payment).filter(Payment.invoice_id == inv.id).delete()
+            db.query(PaymentLink).filter(PaymentLink.invoice_id == inv.id).delete()
+        except Exception:
+            pass
+
+        db.delete(inv)
+
+        try:
+            db.commit()
+        except Exception as e:
+            db.rollback()
+            raise HTTPException(status_code=500, detail=f"Failed to delete invoice: {e}")
+
+        return {
+            "ok": True,
+            "id": iid,
+            "invoice_number": inv_no,
+            "message": f"Invoice {inv_no} deleted",
+        }
+
+
     # ==================== PRIVATE HELPER METHODS ====================
     
     @staticmethod

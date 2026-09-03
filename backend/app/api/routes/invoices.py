@@ -70,6 +70,15 @@ def get_invoice(
 ):
     return InvoiceService.get_invoice_detail(db, invoice_id, scope)
 
+@router.delete("/{invoice_id}")
+def delete_invoice(
+    invoice_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    scope: dict = Depends(get_business_scope),
+):
+    return InvoiceService.delete_invoice(db, invoice_id, scope)
+
 @router.post("/{invoice_id}/payment-link")
 def create_invoice_payment_link(
     invoice_id: int,

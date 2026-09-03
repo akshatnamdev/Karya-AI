@@ -23,6 +23,9 @@ from app.schemas.ai import AIQuery, AIResponse
 from app.services.invoice_service import InvoiceService
 from app.models.order import Order
 from app.models.invoice import Invoice
+from app.services.invoice_service import InvoiceService
+from app.services.product_service import ProductService
+from app.services.order_service import OrderService
 
 class AIAssistantService:
     """AI Business Assistant with caching, demo mode, actions, and fallback"""
@@ -156,6 +159,18 @@ class AIAssistantService:
 
         if intent == "record_payment":
             return AIAssistantService._handle_record_payment(db, query, scope, start_time)
+        
+        if intent == "delete_product":
+            return AIAssistantService._handle_delete_product(db, query, scope, start_time)
+        
+        if intent == "delete_order":
+            return AIAssistantService._handle_delete_order(db, query, scope, start_time)
+        
+        if intent == "delete_invoice":
+            return AIAssistantService._handle_delete_invoice(db, query, scope, start_time)
+        
+        if intent == "activate_product":
+            return AIAssistantService._handle_activate_product(db, query, scope, start_time)
 
         return None
 
@@ -389,7 +404,22 @@ class AIAssistantService:
     def _detect_action_intent(question: str, role: str):
         q = (question or "").lower().strip()
         role = role or ""
+        delete_product_keys = ["delete product", "remove product", "deactivate product"]
+        delete_order_keys = ["delete order", "remove order"]
+        delete_invoice_keys = ["delete invoice", "remove invoice"]
 
+        activate_keys = ["activate product", "restore product", "enable product", "reactivate product"]
+        if role == "business" and any(k in q for k in activate_keys):
+            return "activate_product"
+
+        if role == "business":
+            if any(k in q for k in delete_product_keys):
+                return "delete_product"
+            if any(k in q for k in delete_order_keys):
+                return "delete_order"
+            if any(k in q for k in delete_invoice_keys):
+                return "delete_invoice"
+            
         add_product_keys = [
             "add product",
             "create product",
@@ -764,6 +794,147 @@ class AIAssistantService:
             start_time,
             answer,
             sources=["orders table", "products table", "inventory table"],
+        )
+
+    @staticmethod
+    def _handle_delete_product(db, query, scope, start_time):
+        if scope.get("scope") != "business":
+            return AIAssistantService._action_answer(query, start_time, "Only business can delete products.")
+
+        business_id = scope.get("business_id")
+        # Extract name: "delete product ice cream"
+        name = None
+        m = re.search(r"(?:delete|remove|deactivate)\s+product\s+(.+)$", query.question or "", re.I)
+        if m:
+            name = m.group(1).strip().strip('"').strip("'")
+
+        if not name:
+            return AIAssistantService._action_answer(
+                query, start_time, "Which product? Example: delete product Ice cream"
+            )
+
+        product_id = AIAssistantService._resolve_product_id(db, business_id, name)
+        # resolve even inactive? use query without is_active filter for delete
+        if not product_id:
+            p = (
+                db.query(Product)
+                .filter(Product.business_id == business_id, Product.name.ilike(f"%{name}%"))
+                .first()
+            )
+            product_id = p.id if p else None
+
+        if not product_id:
+            return AIAssistantService._action_answer(query, start_time, f"Product '{name}' not found.")
+
+        try:
+            result = ProductService.delete_product(db, business_id, product_id)
+            AIAssistantService._invalidate_cache(scope)
+        except Exception as e:
+            return AIAssistantService._action_answer(
+                query, start_time, f"Could not delete: {getattr(e, 'detail', None) or e}"
+            )
+
+        return AIAssistantService._action_answer(
+            query, start_time, f"✅ {result.get('message')}", sources=["products table"]
+        )
+
+    @staticmethod
+    def _handle_activate_product(db, query, scope, start_time):
+        if scope.get("scope") != "business":
+            return AIAssistantService._action_answer(query, start_time, "Only business can activate products.")
+
+        business_id = scope.get("business_id")
+        m = re.search(r"(?:activate|restore|enable|reactivate)\s+product\s+(.+)$", query.question or "", re.I)
+        name = m.group(1).strip().strip('"').strip("'") if m else None
+        if not name:
+            return AIAssistantService._action_answer(
+                query, start_time, "Which product? Example: activate product Ice cream"
+            )
+
+        p = (
+            db.query(Product)
+            .filter(Product.business_id == business_id, Product.name.ilike(f"%{name}%"))
+            .first()
+        )
+        if not p:
+            return AIAssistantService._action_answer(query, start_time, f"Product '{name}' not found.")
+
+        try:
+            updated = ProductService.activate_product(db, business_id, p.id)
+            AIAssistantService._invalidate_cache(scope)
+        except Exception as e:
+            return AIAssistantService._action_answer(
+                query, start_time, f"Could not activate: {getattr(e, 'detail', None) or e}"
+            )
+
+        return AIAssistantService._action_answer(
+            query,
+            start_time,
+            f"✅ Product **{updated.get('name')}** is active again and visible in the customer catalog.",
+            sources=["products table"],
+        )
+
+    @staticmethod
+    def _handle_delete_order(db, query, scope, start_time):
+        if scope.get("scope") != "business":
+            return AIAssistantService._action_answer(query, start_time, "Only business can delete orders.")
+
+        ref = AIAssistantService._extract_order_ref(query.question)
+        if not ref:
+            return AIAssistantService._action_answer(
+                query, start_time, "Which order? Example: delete order ORD-1787868587"
+            )
+
+        try:
+            result = OrderService.delete_order(db, ref, scope)
+            AIAssistantService._invalidate_cache(scope)
+        except Exception as e:
+            return AIAssistantService._action_answer(
+                query, start_time, f"Could not delete order: {getattr(e, 'detail', None) or e}"
+            )
+
+        return AIAssistantService._action_answer(
+            query, start_time, f"✅ {result.get('message')}", sources=["orders table"]
+        )
+
+    @staticmethod
+    def _handle_delete_invoice(db, query, scope, start_time):
+        if scope.get("scope") != "business":
+            return AIAssistantService._action_answer(query, start_time, "Only business can delete invoices.")
+
+        business_id = scope.get("business_id")
+        inv_ref = AIAssistantService._extract_invoice_ref(query.question)
+        if not inv_ref:
+            return AIAssistantService._action_answer(
+                query, start_time, "Which invoice? Example: delete invoice INV-1788244848"
+            )
+
+        invoice_pk = AIAssistantService._resolve_invoice_pk(db, business_id, inv_ref)
+        if not invoice_pk:
+            # try exact invoice_number
+            from app.models.invoice import Invoice
+            from app.models.order import Order
+            inv = (
+                db.query(Invoice)
+                .join(Order)
+                .filter(Order.business_id == business_id, Invoice.invoice_number.ilike(f"%{inv_ref}%"))
+                .first()
+            )
+            invoice_pk = inv.id if inv else None
+
+        if not invoice_pk:
+            return AIAssistantService._action_answer(query, start_time, f"Invoice '{inv_ref}' not found.")
+
+        try:
+            result = InvoiceService.delete_invoice(db, invoice_pk, scope)
+            AIAssistantService._invalidate_cache(scope)
+        except Exception as e:
+            return AIAssistantService._action_answer(
+                query, start_time, f"Could not delete invoice: {getattr(e, 'detail', None) or e}"
+            )
+
+        return AIAssistantService._action_answer(
+            query, start_time, f"✅ {result.get('message')}", sources=["invoices table"]
         )
 
     @staticmethod

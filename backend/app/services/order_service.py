@@ -391,6 +391,80 @@ class OrderService:
         new_val = current + float(delta or 0)
         customer.outstanding_amount = new_val if new_val > 0 else 0
 
+    @staticmethod
+    def delete_order(db: Session, order_id, scope: dict) -> dict:
+        """
+        Business only. Only pending or cancelled.
+        Pending => restore stock. Confirmed/delivered => refuse (use cancel first).
+        """
+        if scope.get("scope") != "business":
+            raise HTTPException(status_code=403, detail="Only business can delete orders")
+
+        business_id = scope.get("business_id")
+        if not business_id:
+            raise HTTPException(status_code=400, detail="Business context missing")
+
+        target = str(order_id).strip()
+        q = db.query(Order).filter(Order.business_id == business_id)
+        if target.isdigit():
+            from sqlalchemy import or_
+            q = q.filter(
+                or_(
+                    Order.id == int(target),
+                    Order.order_number == target,
+                    Order.order_number == f"ORD-{target}",
+                )
+            )
+        else:
+            q = q.filter(Order.order_number == target)
+
+        order = q.first()
+        if not order:
+            raise HTTPException(status_code=404, detail="Order not found")
+
+        status_now = (order.status or "").lower()
+        if status_now not in ("pending", "cancelled"):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Cannot delete order in status '{status_now}'. "
+                    "Cancel it first if needed, or only delete pending/cancelled orders."
+                ),
+            )
+
+        # Block if invoice exists and not cancelled
+        inv = db.query(Invoice).filter(Invoice.order_id == order.id).first()
+        if inv and (inv.status or "").lower() not in ("cancelled",):
+            raise HTTPException(
+                status_code=400,
+                detail="Order has an active invoice. Cancel the order/invoice before delete.",
+            )
+
+        order_number = order.order_number
+        oid = order.id
+
+        if status_now == "pending":
+            OrderService._restore_stock_for_order(db, order)
+
+        # Remove items then order (cascade may already handle items)
+        db.query(OrderItem).filter(OrderItem.order_id == order.id).delete()
+        if inv:
+            db.delete(inv)
+        db.delete(order)
+
+        try:
+            db.commit()
+        except Exception as e:
+            db.rollback()
+            raise HTTPException(status_code=500, detail=f"Failed to delete order: {e}")
+
+        return {
+            "ok": True,
+            "id": oid,
+            "order_number": order_number,
+            "message": f"Order {order_number} deleted",
+        }   
+
     # ==================== PRIVATE HELPERS ====================
 
     @staticmethod

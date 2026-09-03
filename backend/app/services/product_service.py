@@ -98,6 +98,80 @@ class ProductService:
         db.refresh(new_product)
         
         return ProductService._format_product_with_stock(new_product, db)    
+    
+    @staticmethod
+    def delete_product(db: Session, business_id: int, product_id: int) -> dict:
+        """
+        Soft-delete: is_active=False so past orders still resolve product names.
+        """
+        product = (
+            db.query(Product)
+            .filter(Product.id == product_id, Product.business_id == business_id)
+            .first()
+        )
+        if not product:
+            raise HTTPException(status_code=404, detail="Product not found")
+
+        product.is_active = False
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise HTTPException(status_code=500, detail="Failed to delete product")
+
+        return {
+            "ok": True,
+            "id": product.id,
+            "name": product.name,
+            "message": f"Product '{product.name}' deactivated (hidden from catalog)",
+        }
+
+    @staticmethod
+    def delete_product(db: Session, business_id: int, product_id: int) -> dict:
+        product = (
+            db.query(Product)
+            .filter(Product.id == product_id, Product.business_id == business_id)
+            .first()
+        )
+        if not product:
+            raise HTTPException(status_code=404, detail="Product not found")
+
+        product.is_active = False
+        try:
+            db.commit()
+            db.refresh(product)
+        except Exception:
+            db.rollback()
+            raise HTTPException(status_code=500, detail="Failed to deactivate product")
+
+        return {
+            "ok": True,
+            "id": product.id,
+            "name": product.name,
+            "is_active": False,
+            "message": f"Product '{product.name}' deactivated (hidden from customer catalog)",
+        }
+
+    @staticmethod
+    def activate_product(db: Session, business_id: int, product_id: int) -> dict:
+        """Restore product to customer catalog."""
+        product = (
+            db.query(Product)
+            .filter(Product.id == product_id, Product.business_id == business_id)
+            .first()
+        )
+        if not product:
+            raise HTTPException(status_code=404, detail="Product not found")
+
+        product.is_active = True
+        try:
+            db.commit()
+            db.refresh(product)
+        except Exception:
+            db.rollback()
+            raise HTTPException(status_code=500, detail="Failed to activate product")
+
+        return ProductService._format_product_with_stock(product, db)
 
     @staticmethod
     def update_stock(
@@ -203,6 +277,7 @@ class ProductService:
 
         return ProductService._format_product_with_stock(product, db)
 
+
     # ==================== PRIVATE HELPERS ====================
     
     @staticmethod
@@ -259,3 +334,13 @@ class ProductService:
         if count == 0:
             return "All stock levels healthy"
         return f"{count} products need reordering"
+
+    @staticmethod
+    def find_by_name(db: Session, business_id: int, name: str, active_only: bool = False):
+        q = db.query(Product).filter(Product.business_id == business_id)
+        if active_only:
+            q = q.filter(Product.is_active == True)
+        p = q.filter(Product.name.ilike(name.strip())).first()
+        if p:
+            return p
+        return q.filter(Product.name.ilike(f"%{name.strip()}%")).first()

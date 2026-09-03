@@ -115,6 +115,22 @@ def update_order_status(
         note=payload.note,
     )
 
+@router.delete("/{order_id}")
+def delete_order(
+    order_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    scope: dict = Depends(get_business_scope),
+):
+    return OrderService.delete_order(db, order_id, scope)@router.delete("/{order_id}")
+def delete_order(
+    order_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    scope: dict = Depends(get_business_scope),
+):
+    return OrderService.delete_order(db, order_id, scope)
+
 @router.get("/{order_id}")
 def get_order(
     order_id: int,

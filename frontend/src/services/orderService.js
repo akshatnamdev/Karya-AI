@@ -21,7 +21,11 @@ export const orderService = {
     return response.data;
   },
 
-  // NEW
+  async remove(id) {
+    const res = await api.delete(`/api/orders/${id}`);
+    return res.data;
+  },  
+
   async updateStatus(orderId, payload) {
     // payload: { status: 'confirmed'|'cancelled'|'delivered', note?: string }
     const response = await api.patch(`/api/orders/${orderId}/status`, payload);

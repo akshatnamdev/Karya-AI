@@ -211,6 +211,23 @@ function InvoicesPage() {
     }
   };
 
+  const handleDeleteInvoice = async () => {
+    if (!selected?.id || !isBusinessOwner) return;
+    if (selected.status === 'paid' || Number(selected.paid) > 0) {
+      alert('Cannot delete paid invoices');
+      return;
+    }
+    if (!window.confirm(`Delete invoice ${selected.invoice_number}?`)) return;
+    try {
+      await invoiceService.remove(selected.id);
+      setSelected(null);
+      setDetail(null);
+      await loadData();
+    } catch (err) {
+      alert(err.response?.data?.detail || err.message || 'Delete failed');
+    }
+  };
+
   const handleCreatePaymentLink = async () => {
     if (!selected?.id || !isBusinessOwner) return;
 
@@ -613,6 +630,14 @@ function InvoicesPage() {
                   Fully paid
                 </div>
               )}
+              {isBusinessOwner &&
+                selected &&
+                selected.status !== 'paid' &&
+                Number(selected.paid || 0) <= 0 && (
+                  <button type="button" onClick={handleDeleteInvoice} style={{ ...btnSecondary, color: '#991b1b', borderColor: '#fecaca', marginTop: 16 }}>
+                    Delete invoice
+                  </button>
+                )}
 
               {/* ===== PAYMENT LINK ===== */}
               {canCreateLink && (

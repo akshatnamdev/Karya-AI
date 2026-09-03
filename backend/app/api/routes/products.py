@@ -109,6 +109,34 @@ def create_product(
         product_data=data,
     )
 
+@router.post("/{product_id}/activate")
+def activate_product(
+    product_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    scope: dict = Depends(get_business_scope),
+):
+    if scope.get("scope") != "business":
+        raise HTTPException(status_code=403, detail="Only business can activate products")
+    business_id = scope.get("business_id")
+    if not business_id:
+        raise HTTPException(status_code=400, detail="Business context missing")
+    return ProductService.activate_product(db, business_id, product_id)
+
+
+@router.delete("/{product_id}")
+def delete_product(
+    product_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    scope: dict = Depends(get_business_scope),
+):
+    if scope.get("scope") != "business":
+        raise HTTPException(status_code=403, detail="Only business can delete products")
+    business_id = scope.get("business_id")
+    if not business_id:
+        raise HTTPException(status_code=400, detail="Business context missing")
+    return ProductService.delete_product(db, business_id, product_id)
 
 @router.get("/{product_id}")
 def get_product(
@@ -118,3 +146,17 @@ def get_product(
     scope: dict = Depends(get_business_scope),
 ):
     return ProductService.get_product_detail(db, product_id, scope)
+
+@router.delete("/{product_id}")
+def delete_product(
+    product_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    scope: dict = Depends(get_business_scope),
+):
+    if scope.get("scope") != "business":
+        raise HTTPException(status_code=403, detail="Only business can delete products")
+    business_id = scope.get("business_id")
+    if not business_id:
+        raise HTTPException(status_code=400, detail="Business context missing")
+    return ProductService.delete_product(db, business_id, product_id)

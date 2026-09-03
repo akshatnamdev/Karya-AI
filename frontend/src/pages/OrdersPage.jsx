@@ -80,6 +80,27 @@ function OrdersPage() {
     }
   };
 
+  const handleDeleteOrder = async () => {
+    if (!selected?.id || !isBusinessOwner) return;
+    const st = selected.status;
+    if (st !== 'pending' && st !== 'cancelled') {
+      alert('Only pending or cancelled orders can be deleted. Cancel first if needed.');
+      return;
+    }
+    if (!window.confirm(`Delete order ${selected.order_number}?`)) return;
+    try {
+      setActionLoading(true);
+      await orderService.remove(selected.id);
+      setSelected(null);
+      setDetail(null);
+      await loadOrders();
+    } catch (err) {
+      setActionError(err.response?.data?.detail || err.message || 'Delete failed');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   const filtered = useMemo(() => {
     let list = orders;
 
@@ -321,6 +342,14 @@ const btnDanger = {
                     )}
                 </div>
               )}
+              <br >
+              </br>
+              {isBusinessOwner &&
+                (selected.status === 'pending' || selected.status === 'cancelled') && (
+                  <button type="button" disabled={actionLoading} onClick={handleDeleteOrder} style={btnDanger}>
+                    Delete order
+                  </button>
+                )}
 
               {/* Customer: cancel only pending */}
               {isCustomer && selected.status === 'pending' && (
@@ -383,6 +412,7 @@ const btnDanger = {
           onCreated={() => {
             loadOrders();
           }}
+          
         />
       )}
     </Layout>

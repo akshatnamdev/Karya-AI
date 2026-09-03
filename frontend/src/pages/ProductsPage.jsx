@@ -21,10 +21,42 @@ function ProductsPage() {
   const [stockSaving, setStockSaving] = useState(false);
   const [stockError, setStockError] = useState('');
   const [stockSuccess, setStockSuccess] = useState('');
+  const [deleteLoading, setDeleteLoading] = useState(false);
+
+  const handleDeleteProduct = async () => {
+    if (!selected?.id || !isBusinessOwner) return;
+    if (!window.confirm(`Deactivate product "${selected.name}"? It will hide from catalog.`)) return;
+    setDeleteLoading(true);
+    try {
+      await productService.remove(selected.id);
+      setSelected(null);
+      await loadProducts();
+    } catch (err) {
+      alert(err.response?.data?.detail || err.message || 'Delete failed');
+    } finally {
+      setDeleteLoading(false);
+    }
+  };
 
   useEffect(() => {
     loadProducts();
   }, []);
+
+
+
+  const handleActivateProduct = async () => {
+    if (!selected?.id || !isBusinessOwner) return;
+    try {
+      setDeleteLoading(true);
+      const updated = await productService.activate(selected.id);
+      await loadProducts();
+      setSelected(updated);
+    } catch (err) {
+      alert(err.response?.data?.detail || err.message || 'Failed to activate');
+    } finally {
+      setDeleteLoading(false);
+    }
+  };
 
   const handleStockUpdate = async () => {
     if (!selected || !isBusinessOwner) return;
@@ -227,12 +259,16 @@ function ProductsPage() {
                         <span className="cell-muted"> / {p.reorder_level ?? 0}</span>
                       </td>
                       <td className="right cell-primary">{formatMoney(p.selling_price)}</td>
-                      <td>
-                        <span className="status-pill">
-                          <span className={`status-dot ${status.dot}`} />
-                          {status.label}
-                        </span>
-                      </td>
+                        <td>
+                          <span className="status-pill">
+                            <span
+                              className={`status-dot ${
+                                p.is_active === false ? 'gray' : status.dot
+                              }`}
+                            />
+                            {p.is_active === false ? 'Inactive' : status.label}
+                          </span>
+                        </td>
                     </tr>
                   );
                 })}
@@ -247,11 +283,77 @@ function ProductsPage() {
             <div className="detail-empty">Select a product to view details</div>
           ) : (
             <>
-              <div className="detail-panel-title">{selected.name}</div>
+              <div
+                className="detail-panel-title"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 10,
+                  flexWrap: 'wrap',
+                }}
+              >
+                <span style={{ marginRight: 8 }}>{selected.name}</span>
 
+                {isBusinessOwner && (
+                  selected.is_active === false ? (
+                    <button
+                      type="button"
+                      disabled={deleteLoading}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleActivateProduct();
+                      }}
+                      style={{
+                        background: '#111827',
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: 6,
+                        padding: '4px 10px',
+                        fontSize: 12,
+                        fontWeight: 500,
+                        cursor: 'pointer',
+                        whiteSpace: 'nowrap',
+                        flexShrink: 0,
+                      }}
+                    >
+                      {deleteLoading ? '…' : 'Activate'}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={deleteLoading}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteProduct();
+                      }}
+                      style={{
+                        background: '#fff',
+                        color: '#991b1b',
+                        border: '1px solid #fecaca',
+                        borderRadius: 6,
+                        padding: '4px 10px',
+                        fontSize: 12,
+                        fontWeight: 500,
+                        cursor: 'pointer',
+                        whiteSpace: 'nowrap',
+                        flexShrink: 0,
+                      }}
+                    >
+                      {deleteLoading ? '…' : 'Deactivate'}
+                    </button>
+                  )
+                )}
+              </div>
               <div className="detail-row">
                 <span className="detail-label">SKU</span>
                 <span className="detail-value">{selected.sku || '—'}</span>
+              </div>
+              <div className="detail-row">
+                <span className="detail-label">Catalog</span>
+                <span className="detail-value">
+                  {selected.is_active === false ? 'Hidden from customers' : 'Visible to customers'}
+                </span>
               </div>
               <div className="detail-row">
                 <span className="detail-label">Category</span>
@@ -307,7 +409,8 @@ function ProductsPage() {
                 </span>
                 
               </div>
-                            {isBusinessOwner && (
+  {/* Update Stock Controls */}
+              {isBusinessOwner && (
                 <>
                   <div className="detail-section-label">Update stock</div>
                   {stockError && (
@@ -323,7 +426,7 @@ function ProductsPage() {
                   <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
                     <select
                       className="search-input"
-                      style={{ width: 120 }}
+                      style={{ width: 100 }}
                       value={stockMode}
                       onChange={(e) => setStockMode(e.target.value)}
                     >
@@ -333,7 +436,7 @@ function ProductsPage() {
                     </select>
                     <input
                       className="search-input"
-                      style={{ width: 100 }}
+                      style={{ width: 80 }}
                       type="number"
                       min="0"
                       placeholder="Qty"
@@ -372,7 +475,9 @@ function ProductsPage() {
           )}
         </aside>
       </div>
-            {isBusinessOwner && (
+
+      {/* Add Product Modal */}
+      {isBusinessOwner && (
         <AddProductModal
           open={showAddProduct}
           onClose={() => setShowAddProduct(false)}
@@ -384,5 +489,6 @@ function ProductsPage() {
     </Layout>
   );
 }
+
 
 export default ProductsPage;
