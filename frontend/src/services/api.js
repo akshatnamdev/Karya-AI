@@ -16,6 +16,13 @@ api.interceptors.request.use(
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
+
+    // Attach active business ID for multi-business customers
+    const activeBusinessId = localStorage.getItem('karya_active_business_id');
+    if (activeBusinessId) {
+      config.headers['X-Business-Id'] = activeBusinessId;
+    }
+
     return config;
   },
   (error) => Promise.reject(error)

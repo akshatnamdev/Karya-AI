@@ -41,7 +41,6 @@ class User(Base):
     
     # Foreign Keys
     business_id = Column(Integer, ForeignKey("businesses.id"), nullable=True, index=True)
-    # For CUSTOMER role, this links to the customer record in the business
     customer_id = Column(Integer, ForeignKey("customers.id"), nullable=True, index=True)
     
     # Timestamps
@@ -55,6 +54,7 @@ class User(Base):
     conversations = relationship("Conversation", back_populates="user")
     ai_actions = relationship("AIAction", back_populates="approved_by_user")
     audit_logs = relationship("AuditLog", back_populates="user")
+    customer_profiles = relationship("Customer", back_populates="user", foreign_keys="Customer.user_id")
     
     def __repr__(self):
         return f"<User(id={self.id}, email='{self.email}', role='{self.role}')>"

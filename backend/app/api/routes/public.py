@@ -7,32 +7,39 @@ from pydantic import BaseModel
 
 from app.db.database import get_db
 from app.models.business import Business
-
-from app.db.database import get_db
-from app.core.dependencies import get_current_user, get_business_scope
-from app.models.user import User
 from app.services.payment_service import PaymentService
 
 router = APIRouter(prefix="/api/public", tags=["Public"])
+
 
 class CheckoutVerifyBody(BaseModel):
     razorpay_order_id: str
     razorpay_payment_id: str
     razorpay_signature: str
 
+
 @router.get("/businesses")
+@router.get("/businesses/public")
 def list_businesses(db: Session = Depends(get_db)):
-    """List businesses customers can join (minimal public info)"""
-    businesses = db.query(Business).order_by(Business.name).all()
-    return [
-        {
-            "id": b.id,
-            "name": b.name,
-            "city": b.city,
-            "business_type": b.business_type,
-        }
-        for b in businesses
-    ]
+    """
+    Public endpoint for customer signup page dropdown.
+    Returns all registered businesses with Name and City.
+    """
+    try:
+        businesses = db.query(Business).order_by(Business.name.asc()).all()
+        return [
+            {
+                "id": b.id,
+                "name": b.name,
+                "city": getattr(b, "city", None) or "India",
+                "business_type": getattr(b, "business_type", None) or "General",
+            }
+            for b in businesses
+        ]
+    except Exception as e:
+        print(f"[list_businesses error] {e}")
+        return []
+
 
 @router.get("/pay/{token}")
 def public_pay_session(token: str, db: Session = Depends(get_db)):

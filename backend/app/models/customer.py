@@ -34,8 +34,9 @@ class Customer(Base):
     notes = Column(Text, nullable=True)
     tags = Column(String(500), nullable=True)  # comma-separated tags
     
-    # Foreign Key
+    # Foreign Keys
     business_id = Column(Integer, ForeignKey("businesses.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -45,6 +46,7 @@ class Customer(Base):
     # Relationships
     business = relationship("Business", back_populates="customers")
     orders = relationship("Order", back_populates="customer")
+    user = relationship("User", back_populates="customer_profiles", foreign_keys=[user_id])
     
     def __repr__(self):
         return f"<Customer(id={self.id}, name='{self.name}')>"

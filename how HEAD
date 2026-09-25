@@ -1,0 +1,20 @@
+[33mcommit 2ea40604806c728761cd5a7dd4f5f916f0c81536[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m)[m
+Author: Akshat Namdev <akshatnamdev23@gmail.com>
+Date:   Thu Sep 3 18:18:07 2026 +0530
+
+     Fixed all small bugs which are occuring
+
+ backend/app/api/routes/invoices.py           |   9 [32m++[m
+ backend/app/api/routes/orders.py             |  16 [32m+++[m
+ backend/app/api/routes/products.py           |  44 [32m++++++[m[31m-[m
+ backend/app/services/ai_assistant_service.py | 171 [32m+++++++++++++++++++++++++++[m
+ backend/app/services/invoice_service.py      |  76 [32m++++++++++++[m
+ backend/app/services/order_service.py        |  74 [32m++++++++++++[m
+ backend/app/services/product_service.py      |  87 [32m+++++++++++++[m[31m-[m
+ frontend/src/pages/InvoicesPage.jsx          |  25 [32m++++[m
+ frontend/src/pages/OrdersPage.jsx            |  30 [32m+++++[m
+ frontend/src/pages/ProductsPage.jsx          | 128 [32m++++++++++++++++++[m[31m--[m
+ frontend/src/services/invoiceService.js      |   6 [32m+[m[31m-[m
+ frontend/src/services/orderService.js        |   6 [32m+[m[31m-[m
+ frontend/src/services/productService.js      |  16 [32m+++[m
+ 13 files changed, 673 insertions(+), 15 deletions(-)

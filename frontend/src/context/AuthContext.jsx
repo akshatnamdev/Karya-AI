@@ -62,7 +62,10 @@ export const AuthProvider = ({ children }) => {
 
   const logout = () => {
     setUser(null);
-    authService.logout();
+    localStorage.removeItem('karya_token');
+    localStorage.removeItem('karya_user');
+    localStorage.removeItem('karya_active_business_id'); // Clear active business selection on logout
+    if (authService.logout) authService.logout();
   };
 
   // Role helpers

@@ -22,18 +22,22 @@ function CustomerRegisterPage() {
   const [loadingBiz, setLoadingBiz] = useState(true);
 
   useEffect(() => {
-    // Public list of businesses to join (we'll add this API)
+    // Fetch public list of businesses for dropdown
     api
       .get('/api/public/businesses')
       .then((res) => {
-        setBusinesses(res.data || []);
-        if (res.data?.length === 1) {
-          setFormData((f) => ({ ...f, business_id: String(res.data[0].id) }));
+        const list = Array.isArray(res.data)
+          ? res.data
+          : res.data?.businesses || res.data?.data || [];
+        setBusinesses(list);
+
+        if (list.length > 0) {
+          setFormData((f) => ({ ...f, business_id: String(list[0].id) }));
         }
       })
-      .catch(() => {
-        // Fallback: allow manual business_id
-        setBusinesses([]);
+      .catch((err) => {
+        console.error('Failed to load businesses:', err);
+        setError('Could not load businesses list. Please refresh the page.');
       })
       .finally(() => setLoadingBiz(false));
   }, []);
@@ -55,22 +59,38 @@ function CustomerRegisterPage() {
     }
 
     const payload = {
-      name: formData.name,
-      email: formData.email,
+      name: formData.name.trim(),
+      email: formData.email.trim().toLowerCase(),
       password: formData.password,
-      phone: formData.phone,
+      phone: formData.phone.trim() || null,
       business_id: Number(formData.business_id),
     };
 
-    const result = await registerCustomer(payload);
+    try {
+      const result = await registerCustomer(payload);
 
-    if (result.success) {
-      navigate(result.redirectTo || result.data?.redirect_to || '/portal');
-    } else {
-      setError(typeof result.error === 'string' ? result.error : 'Registration failed');
+      if (result && result.success) {
+        navigate(result.redirectTo || result.data?.redirect_to || '/portal');
+        return;
+      }
+
+      // Prefer real backend message
+      const raw = result?.error;
+      let msg = 'Registration failed.';
+      if (typeof raw === 'string') msg = raw;
+      else if (raw?.detail) msg = typeof raw.detail === 'string' ? raw.detail : JSON.stringify(raw.detail);
+      else if (raw?.message) msg = raw.message;
+      setError(msg);
+    } catch (err) {
+      const detail = err?.response?.data?.detail;
+      let msg = 'Registration failed.';
+      if (typeof detail === 'string') msg = detail;
+      else if (Array.isArray(detail)) msg = detail.map((d) => d.msg || JSON.stringify(d)).join(', ');
+      else if (err?.message) msg = err.message;
+      setError(msg);
+    } finally {
+      setLoading(false);
     }
-
-    setLoading(false);
   };
 
   return (
@@ -90,33 +110,33 @@ function CustomerRegisterPage() {
           <div className="form-group">
             <label className="form-label">Business you order from</label>
             {loadingBiz ? (
-              <p style={{ fontSize: 13, color: '#6b7280' }}>Loading businesses...</p>
-            ) : businesses.length > 0 ? (
+              <p style={{ fontSize: 13, color: '#6b7280', margin: '8px 0' }}>
+                Loading available businesses...
+              </p>
+            ) : (
               <select
                 name="business_id"
                 value={formData.business_id}
                 onChange={handleChange}
                 required
                 className="form-select"
+                style={{
+                  width: '100%',
+                  padding: '10px 12px',
+                  borderRadius: '8px',
+                  border: '1px solid #d1d5db',
+                  backgroundColor: '#ffffff',
+                  fontSize: '14px',
+                  color: '#111827',
+                }}
               >
-                <option value="">Select business</option>
+                <option value="">Select a business...</option>
                 {businesses.map((b) => (
                   <option key={b.id} value={b.id}>
                     {b.name} {b.city ? `(${b.city})` : ''}
                   </option>
                 ))}
               </select>
-            ) : (
-              <input
-                type="number"
-                name="business_id"
-                value={formData.business_id}
-                onChange={handleChange}
-                required
-                placeholder="Business ID (ask the shop)"
-                className="form-input"
-                style={{ paddingLeft: 12 }}
-              />
             )}
           </div>
 
@@ -180,7 +200,7 @@ function CustomerRegisterPage() {
 
           {error && <div className="error-message">{error}</div>}
 
-          <button type="submit" disabled={loading} className="btn-primary">
+          <button type="submit" disabled={loading || loadingBiz} className="btn-primary">
             {loading ? <Loader2 size={16} className="spin" /> : 'Create customer account'}
           </button>
         </form>

@@ -34,8 +34,13 @@ const handleSubmit = async (e) => {
        '/dashboard');
     navigate(redirect);
   } else {
-    setError(typeof result.error === 'string' ? result.error : 'Login failed');
-  }
+// inside login submit catch / failure branch:
+  const detail = err?.response?.data?.detail || result?.error;
+  setError(
+    typeof detail === 'string'
+      ? detail
+      : 'Login failed. Please try again.'
+  );  }
 
   setLoading(false);
 };
