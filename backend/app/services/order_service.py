@@ -565,4 +565,5 @@ class OrderService:
             "total": safe_float(order.total_amount),
             "status": order.status,
             "date": safe_iso(order.order_date),
+            
         }
