@@ -1,5 +1,6 @@
 <div align="center">
 
+
 # 🧠 Karya AI
 
 ### *AI Operating System for Indian Small Businesses*
@@ -9,12 +10,11 @@
 [![Python](https://img.shields.io/badge/Python-3.11-blue.svg?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.109-009688.svg?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-336791.svg?style=for-the-badge&logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+[![React](https://img.shields.io/badge/React-18-61DAFB.svg?style=for-the-badge&logo=react&logoColor=black)](https://reactjs.org/)
 [![Gemini AI](https://img.shields.io/badge/Gemini_AI-Latest-4285F4.svg?style=for-the-badge&logo=google&logoColor=white)](https://ai.google.dev/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](LICENSE)
 
-[Features](#-features) • [Tech Stack](#-tech-stack) • [Installation](#-installation) • [Demo](#-demo-flow) • [Roadmap](#-roadmap)
-
----
+[Features](#-features) • [Tech Stack](#-tech-stack) • [Installation](#-installation) • [Architecture](#-architecture) • [Roadmap](#-roadmap)
 
 </div>
 
@@ -43,10 +43,17 @@ All with **owner approval** where needed — AI proposes, you approve, action ex
 
 ---
 
-## ✨ Features
 
-### 🧠 AI Business Assistant
-Natural language Q&A over your business data with source citations.
+## ✨ Key Features
+
+### 🔐 Multi-Tenant Role-Based Access (RBAC)
+Secure data isolation across three distinct user roles:
+- **Platform Admin (`/admin`)**: God-mode view of all businesses, users, and platform revenue.
+- **Business Owner (`/dashboard`)**: Full control over their own business, inventory, and customers.
+- **Customer Portal (`/portal`)**: End-users can view their own orders, invoices, and browse the catalog.
+
+### 🧠 AI Business Assistant (RAG Powered)
+Natural language Q&A over scoped business data with source citations and 100% uptime fallback.
 ```
 You: "Raj Traders ne pichle 3 mahine mein kya kharida?"
 Karya: "Raj Traders bought ₹2,45,000 worth of products including:
@@ -114,7 +121,7 @@ Understands Hinglish business language naturally.
 ### Database
 | Technology | Purpose |
 |------------|---------|
-| **PostgreSQL 16** | Primary database (Neon Cloud) |
+| **PostgreSQL 16** | Primary database |
 | **pgvector** | Vector embeddings for RAG |
 
 ### AI/ML
