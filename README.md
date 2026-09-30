@@ -232,6 +232,15 @@ ACCESS_TOKEN_EXPIRE_MINUTES=1440
 # App Config
 APP_NAME=Karya AI
 DEBUG=True
+
+# Payment
+PAYMENT_PROVIDER=razorpay
+PAYMENT_PUBLIC_BASE_URL=http://localhost:5173
+PAYMENT_LINK_EXPIRY_HOURS=72
+
+RAZORPAY_KEY_ID=rzp_test_***************
+RAZORPAY_KEY_SECRET=***************
+RAZORPAY_WEBHOOK_SECRET=your_webhook_secret
 ```
 
 **5. Get your credentials**
